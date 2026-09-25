@@ -1,0 +1,9 @@
+[project]
+name = "sage-scholar"
+version = "0.1.0"
+description = "Adaptive personal research workspace built from SAGE Research"
+requires-python = ">=3.11,<3.15"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

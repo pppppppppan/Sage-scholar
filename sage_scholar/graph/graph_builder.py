@@ -1,0 +1,192 @@
+import logging
+import operator
+
+from typing import Annotated, Callable, TypedDict
+from langgraph.graph import StateGraph, START, END
+from langgraph.types import Send
+
+from sage_scholar.agents.supervisor import ReviewResult, SubQuestion
+from ..agents import Supervisor, Writer, Researcher
+
+logger = logging.getLogger(__name__)
+
+
+def pending_review_reducer(existing: list, new: list) -> list:
+    if not new:
+        return []
+    else:
+        return existing + new
+
+
+def merge_dicts(a: dict, b: dict) -> dict:
+    return {**(a or {}), **(b or {})}
+
+
+class State(TypedDict):
+    research_brief: str
+    sub_questions: list[SubQuestion]
+    review_result: dict
+    approved_pairs: Annotated[list[tuple[str, str]], operator.add]
+    pending_review_pairs: Annotated[list[tuple[str, str]], pending_review_reducer]
+    refine_round: int
+    final_report: str
+    retry_items: list[dict]
+    review_summary: list[dict]
+    missing_dimensions: str
+    tool_call_counts: Annotated[dict, merge_dicts]
+
+
+class InputSchema(TypedDict):
+    research_brief: str
+
+
+class OutputSchema(TypedDict):
+    final_report: str
+
+    
+def build_graph(
+    supervisor: Supervisor,
+    create_researcher: Callable[[str], Researcher],
+    writer: Writer,
+    max_rounds: int = 3,
+):
+    builder = StateGraph(
+        State, input_schema=InputSchema, output_schema=OutputSchema
+    )
+
+    def hand_out_subquestion(state: State) -> Send:
+        total = len(state["sub_questions"])
+        return [
+            Send(
+                "research_node",
+                {
+                    "sub_question": sq.question,
+                    "note_feedback": "",
+                    "researcher_id": f"R-{i+1}/{total}",
+                }
+            )
+            for i, sq in enumerate(state["sub_questions"])
+        ]
+
+    def reviewer_route(state: State) -> str:
+        if state["refine_round"] > max_rounds:
+            logger.info("[Graph] route: 超过最大轮数 %d, 进入 write", max_rounds)
+            return "write_node"
+
+        review = state["review_result"]
+        verdicts = {nr["verdict"] for nr in review["note_reviews"]}
+
+        if verdicts == {"approved"} and not review.get("missing_dimensions"):
+            logger.info("[Graph] route: 全部通过, 进入 write")
+            return "write_node"
+
+        if verdicts <= {"approved", "retry"} and not review.get("missing_dimensions"):
+            retry_items = state["retry_items"]
+            total = len(retry_items)
+            logger.info("[Graph] route: %d 条 retry, 重新研究", total)
+            return [Send("research_node", {**item, "researcher_id": f"Retry-{i+1}/{total}"}) for i, item in enumerate(retry_items)]
+
+        logger.info("[Graph] route: 需要 replan (verdicts=%s, missing=%s)", verdicts, bool(review.get("missing_dimensions")))
+        return "plan_node"
+
+    def plan_node(state: State) -> dict[str, SubQuestion]:
+        review_dict = state.get("review_result")
+        review = ReviewResult(**review_dict) if review_dict else None
+        result = supervisor.plan(
+            research_brief=state["research_brief"],
+            approved_pairs=state.get("approved_pairs"),
+            review_result=review,
+        )
+        return {"sub_questions": result}
+
+    def research_node(state: dict) -> dict:
+        researcher = create_researcher(state.get("researcher_id", "R-?"))
+        note, tool_call_counts = researcher.run(
+            sub_question=state["sub_question"], note_feedback=state["note_feedback"]
+        )
+        return {
+            "pending_review_pairs": [(state["sub_question"], note)],
+            "tool_call_counts": tool_call_counts,
+        }
+
+    def review_node(state: State) -> dict:
+        result = supervisor.review(
+            research_brief=state["research_brief"],
+            pending_review_pairs=state["pending_review_pairs"],
+            approved_pairs=state.get("approved_pairs", [])
+        )
+        n_pairs = len(state["pending_review_pairs"])
+        n_reviews = len(result.note_reviews)
+        if n_reviews != n_pairs:
+            logger.warning("[Graph] review_node: note_reviews(%d) != pending_pairs(%d), 截断到 %d", n_reviews, n_pairs, min(n_reviews, n_pairs))
+            for i, nr in enumerate(result.note_reviews):
+                logger.debug("  [%d] verdict=%s, failed=%s", i, nr.verdict, nr.failed_criteria()[:100])
+            result.note_reviews = result.note_reviews[:n_pairs]
+
+        approved_pairs = [
+            state["pending_review_pairs"][i]
+            for i, note_review in enumerate(result.note_reviews)
+            if note_review.verdict == "approved"
+        ]
+        retry_items = [
+            {
+                "sub_question": state["pending_review_pairs"][i][0],
+                "note_feedback": note_review.failed_criteria(),
+            }
+            for i, note_review in enumerate(result.note_reviews)
+            if note_review.verdict == "retry"
+        ]
+
+        review_summary = [
+            {
+                "question": state["pending_review_pairs"][i][0],
+                "verdict": nr.verdict,
+                "failed": {
+                    "relevance": nr.verdict == "revise",
+                    "depth": "FAIL" in nr.depth,
+                    "citations": "FAIL" in nr.citations,
+                    "sources": "FAIL" in nr.sources,
+                    "completeness": "FAIL" in nr.completeness,
+                },
+                "evidence": {
+                    "relevance": nr.relevance,
+                    "depth": nr.depth,
+                    "citations": nr.citations,
+                    "sources": nr.sources,
+                    "completeness": nr.completeness,
+                },
+            }
+            for i, nr in enumerate(result.note_reviews)
+        ]
+
+        return {
+            "review_result": result.model_dump(),
+            "approved_pairs": approved_pairs,
+            "refine_round": state.get("refine_round", 0) + 1,
+            "pending_review_pairs": [],
+            "retry_items": retry_items,
+            "review_summary": review_summary,
+            "missing_dimensions": result.missing_dimensions,
+        }
+
+    def write_node(state: State) -> dict:
+        result = writer.run(
+            research_brief=state["research_brief"],
+            notes=[note for _, note in state["approved_pairs"]],
+        )
+        return {"final_report": result}
+
+    # add node
+    builder.add_node("plan_node", plan_node)
+    builder.add_node("research_node", research_node)
+    builder.add_node("review_node", review_node)
+    builder.add_node("write_node", write_node)
+
+    # add edge
+    builder.add_edge(START, "plan_node")
+    builder.add_conditional_edges("plan_node", hand_out_subquestion, ["research_node"])
+    builder.add_edge("research_node", "review_node")
+    builder.add_conditional_edges("review_node", reviewer_route, ["plan_node", "research_node", "write_node"])
+    builder.add_edge("write_node", END)
+
+    return builder.compile()

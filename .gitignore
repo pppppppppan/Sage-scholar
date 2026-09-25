@@ -1,0 +1,85 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python environments and caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+dist/
+build/
+.requirements_hash
+
+# Frontend dependencies, caches and builds
+web/node_modules/
+web/.next/
+web/out/
+web/coverage/
+.npm-cache/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime data and generated research artifacts
+logs/
+data/*
+!data/.gitkeep
+!data/rag/
+!data/rag/.gitkeep
+!data/downloads/
+!data/downloads/.gitkeep
+artifacts/
+outputs/
+tmp/
+temp/
+checkpoints/
+traces/
+eval-results/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# Local documents and datasets
+docs/
+*.pdf
+*.doc
+*.docx
+*.ppt
+*.pptx
+*.xls
+*.xlsx
+*.csv
+*.tsv
+*.epub
+*.zip
+*.tar
+*.tar.gz
+
+# Generated framework/agent guidance
+web/AGENTS.md
+web/CLAUDE.md
+
+# Editor and operating-system files
+.DS_Store
+._*
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
