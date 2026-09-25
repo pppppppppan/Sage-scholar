@@ -1,6 +1,7 @@
 import logging
 from typing import Any
 from .base_tool import BaseTool
+from sage_scholar.domain.execution import SourcePolicy
 
 logger = logging.getLogger(__name__)
 
@@ -37,3 +38,13 @@ class ToolRegistry:
                 raise ValueError(f"⚠️ 调用工具时发生错误: 不存在名称为{name}的工具，请检查输入")
 
         return schemas
+
+    def for_policy(self, whitelist: list[str], policy: SourcePolicy, *, local_tools=(), wrap=None):
+        """Create run-local capabilities; never mutate a shared registry's policy."""
+        from .policy import PolicyTool
+        tools = {**self.tools, **{tool.name: tool for tool in local_tools}}
+        return [
+            PolicyTool(wrap(tools[name]) if wrap else tools[name], policy)
+            for name in whitelist
+            if name in tools and policy.permits_tool(tools[name].source_access)
+        ]

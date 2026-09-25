@@ -9,6 +9,7 @@ class MCPTool(BaseTool):
     """
     Adapt mcp tools into our own tool base class.
     """
+    source_access = "public"
     def __init__(
         self, 
         original_name: str, 
@@ -49,4 +50,3 @@ def register_mcp_tools(registry: ToolRegistry, clients: list[MCPClient]):
                 mcp_client=mcp_client
             )
             registry.register_tool(mcp_tool)
-    

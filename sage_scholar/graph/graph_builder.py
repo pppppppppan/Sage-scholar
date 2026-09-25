@@ -122,6 +122,11 @@ def build_graph(
             for i, nr in enumerate(result.note_reviews):
                 logger.debug("  [%d] verdict=%s, failed=%s", i, nr.verdict, nr.failed_criteria()[:100])
             result.note_reviews = result.note_reviews[:n_pairs]
+            if n_reviews < n_pairs:
+                unreviewed = "未完成审查：" + "；".join(
+                    question for question, _ in state["pending_review_pairs"][n_reviews:]
+                )
+                result.missing_dimensions = "; ".join(filter(None, [result.missing_dimensions, unreviewed]))
 
         approved_pairs = [
             state["pending_review_pairs"][i]

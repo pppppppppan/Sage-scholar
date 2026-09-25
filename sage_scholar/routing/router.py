@@ -33,11 +33,12 @@ class QueryRouter:
 
         workflow = requested_workflow or self._infer_workflow(text, bool(docs))
         scope = requested_scope or self._infer_scope(text, workflow, bool(docs))
-        web_allowed = allow_web if allow_web is not None else not bool(self._NO_WEB.search(text))
+        web_allowed = allow_web is not False and not bool(self._NO_WEB.search(text))
         if scope in {SourceScope.SELECTED_DOCUMENTS, SourceScope.WORKSPACE}:
             web_allowed = False
 
-        needs_document = workflow in {Workflow.QA, Workflow.PAPER2CODE} and self._refers_to_unspecified_document(text, docs)
+        needs_document = scope == SourceScope.SELECTED_DOCUMENTS and not docs
+        needs_document = needs_document or workflow in {Workflow.QA, Workflow.PAPER2CODE} and self._refers_to_unspecified_document(text, docs)
         execution_mode = (
             ExecutionMode.RUN
             if workflow in {Workflow.DEEP_RESEARCH, Workflow.CITATION_AUDIT, Workflow.PAPER2CODE}

@@ -6,6 +6,7 @@ import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .ports import ModelGateway
+from sage_scholar.domain.execution import ExecutionRequest
 
 
 class DirectService:
@@ -15,10 +16,9 @@ class DirectService:
 
     async def answer(
         self,
-        query: str,
-        timezone: str,
-        history: list[dict[str, str]] | None = None,
+        request: ExecutionRequest,
     ) -> str:
+        query, timezone, history = request.query, request.timezone, request.history
         if re.search(r"今天.{0,3}(星期几|周几)|今天是星期|今天是周", query):
             try:
                 zone = ZoneInfo(timezone)

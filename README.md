@@ -17,6 +17,15 @@ flowchart LR
     SSE --> UI
 ```
 
+## 本轮更新（2026-09-25）
+
+- ExecutionRequest 将 Router 的资料范围、文档 ID 和联网限制传到 QA/Research；工具层强制执行。
+- 文档使用持久 UUID、内容版本和摄取状态；Evidence 保存原文、版本、位置并支持 API 回读。
+- QA 区分定点检索和全文章节概览，内部使用 evidence ID，检测无效引用编号。
+- Research 保留原图，新增 PARTIAL 结果与缺口展示；原 HTTP URL 保持不变。
+- 最终验证：43 项后端测试、compileall、前端 lint/build 全部通过。真实外部模型/MCP 连通性未在本轮测试。
+- 完整交付及边界见 [本轮交付说明](docs/iteration-source-policy.md)。文档按 .gitignore 保留在本地。
+
 ## 当前可以运行的功能
 
 - `Direct`：日期、星期等本地确定性问题不调用模型；其他简单问题通过统一 Model Gateway 回答。

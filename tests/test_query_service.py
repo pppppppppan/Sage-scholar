@@ -6,6 +6,7 @@ from sage_scholar.application.direct_service import DirectService
 from sage_scholar.application.qa_service import QAService
 from sage_scholar.application.query_service import QueryCommand, QueryService, QueryStatus
 from sage_scholar.domain import EvidenceRef
+from sage_scholar.domain.execution import RunOutcome
 from sage_scholar.routing import QueryRouter, Workflow
 from sage_scholar.runtime import RunManager, RunStatus
 
@@ -21,7 +22,7 @@ class FakeModel:
 
 
 class FakeRetrieval:
-    async def retrieve(self, query, *, document_ids, top_k=5):
+    async def retrieve(self, query, *, policy, top_k=5):
         return [
             EvidenceRef(
                 evidence_id="ev-1",
@@ -32,10 +33,10 @@ class FakeRetrieval:
 
 
 class FakeRunner:
-    async def run(self, query, emit, cancelled):
-        await emit("plan", {"sub_questions": [{"label": "方法", "question": query}]})
+    async def run(self, request, emit, cancelled):
+        await emit("plan", {"sub_questions": [{"label": "方法", "question": request.query}]})
         await emit("write", {"report": "# report"})
-        return {"report": "# report"}
+        return RunOutcome(result={"report": "# report"})
 
 
 def make_service(model=None):

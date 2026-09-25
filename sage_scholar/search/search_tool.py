@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class SearchTool(BaseTool):
+    source_access = "public"
     def __init__(
         self,
         brave_tool: MCPTool | None = None,

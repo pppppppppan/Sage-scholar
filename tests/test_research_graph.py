@@ -49,3 +49,16 @@ def test_research_returns_report_without_rag_write_dependency():
     result = graph.invoke({"research_brief": "调研测试主题"})
 
     assert result == {"final_report": "# 最终报告"}
+
+
+def test_missing_review_entries_are_reported_as_gaps():
+    class MissingReview(FakeSupervisor):
+        def review(self, **kwargs):
+            return ReviewResult(note_reviews=[], missing_dimensions="")
+    class Writer:
+        def run(self, **kwargs):
+            return "partial report"
+    graph = build_graph(MissingReview(), lambda _: FakeResearcher(), Writer(), max_rounds=0)
+    events = list(graph.stream({"research_brief": "topic"}))
+    review = next(event["review_node"] for event in events if "review_node" in event)
+    assert "未完成审查" in review["missing_dimensions"]

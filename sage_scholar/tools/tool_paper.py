@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 class PaperReaderTool(BaseTool):
     """combine mcptools: download_arxiv + read_arxiv_paper"""
+    source_access = "public"
 
     def __init__(self, download_tool: MCPTool, read_tool: MCPTool):
         super().__init__(

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import uuid
 
 from sage_scholar.application.ports import LongTaskRunner
-from sage_scholar.routing import Workflow
+from sage_scholar.domain.execution import ExecutionRequest
 
 from .models import RunEvent, RunSnapshot, RunStatus, TERMINAL_STATUSES, utc_now
 
@@ -27,21 +27,22 @@ class RunManager:
         self._tasks: dict[str, asyncio.Task] = {}
         self._semaphore = asyncio.Semaphore(max_concurrent_runs)
 
-    async def start(self, workflow: Workflow, query: str, runner: LongTaskRunner) -> RunSnapshot:
+    async def start(self, request: ExecutionRequest, runner: LongTaskRunner) -> RunSnapshot:
         run_id = uuid.uuid4().hex
         now = utc_now()
         state = _RunState(
             snapshot=RunSnapshot(
                 run_id=run_id,
-                workflow=workflow,
-                query=query,
+                workflow=request.workflow,
+                query=request.query,
+                execution=request.model_copy(deep=True),
                 status=RunStatus.CREATED,
                 created_at=now,
                 updated_at=now,
             )
         )
         self._runs[run_id] = state
-        await self._append_event(state, "run_created", {"workflow": workflow.value})
+        await self._append_event(state, "run_created", {"workflow": request.workflow.value})
         task = asyncio.create_task(self._execute(state, runner), name=f"sage-run-{run_id}")
         self._tasks[run_id] = task
         task.add_done_callback(lambda _task, rid=run_id: self._tasks.pop(rid, None))
@@ -106,18 +107,23 @@ class RunManager:
                 async def emit(event_type: str, data: dict) -> None:
                     await self._append_event(state, event_type, data)
 
-                result = await runner.run(
-                    state.snapshot.query,
+                outcome = await runner.run(
+                    state.snapshot.execution,
                     emit,
                     lambda: state.cancel_requested,
                 )
-                state.snapshot.result = result
+                state.snapshot.result = outcome.result
+                state.snapshot.reason = outcome.reason
+                state.snapshot.remaining_gaps = outcome.remaining_gaps
                 if state.cancel_requested:
                     self._set_status(state, RunStatus.CANCELLED)
                     await self._append_event(state, "run_cancelled", {})
                 else:
-                    self._set_status(state, RunStatus.COMPLETED)
-                    await self._append_event(state, "run_finished", {"status": "completed"})
+                    self._set_status(state, RunStatus(outcome.status))
+                    await self._append_event(state, "run_finished", {
+                        "status": outcome.status, "reason": outcome.reason,
+                        "remaining_gaps": outcome.remaining_gaps,
+                    })
         except asyncio.CancelledError:
             self._set_status(state, RunStatus.INTERRUPTED)
             await self._append_event(state, "run_interrupted", {})

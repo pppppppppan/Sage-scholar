@@ -13,6 +13,8 @@ class ToolParameter(BaseModel):
 
 class BaseTool(ABC):
     """工具基类"""
+    # Unknown tools are denied until their source capability is declared.
+    source_access = "unknown"
     def __init__(self, name: str, description: str, parameters: list[ToolParameter]):
         self.name = name
         self.description = description

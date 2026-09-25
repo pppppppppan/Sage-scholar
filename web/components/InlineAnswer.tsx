@@ -16,7 +16,7 @@ export default function InlineAnswer({ answer, evidence }: { answer: string; evi
           <div className="flex flex-col gap-3">
             {evidence.map((item, index) => (
               <details key={item.evidence_id} className="rounded-lg border border-foreground/10 px-3 py-2 text-sm">
-                <summary className="cursor-pointer text-foreground/70">[{index + 1}] {item.source_id}</summary>
+                <summary className="cursor-pointer text-foreground/70">[{index + 1}] {String(item.metadata.title || item.source_id)}{item.section ? ` · ${item.section}` : ""}{item.page !== null ? ` · p.${item.page}` : ""}</summary>
                 <p className="mt-2 whitespace-pre-wrap text-foreground/65">{item.text}</p>
               </details>
             ))}

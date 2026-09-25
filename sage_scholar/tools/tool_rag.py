@@ -1,32 +1,23 @@
-from typing import Any
-
 from .base_tool import BaseTool, ToolParameter
-from ..rag import Pipeline
 
 
 class RAGTool(BaseTool):
-    def __init__(self, pipeline: Pipeline):
+    source_access = "local"
+
+    def __init__(self, retrieval, policy, record=lambda evidence: None):
         super().__init__(
             name="rag_search",
-            description=(
-                "在本地知识库中检索信息。"
-                "适用于查询知识库中已有的、相对稳定的知识内容，如已导入的技术文档、论文笔记、项目资料等。"
-                "不适用于查询实时信息、最新新闻或知识库中未收录的内容。检索质量取决于已导入的文档覆盖范围。"
-                "返回按相关性排序的文本片段列表，格式为 [序号] 内容。未找到相关内容时返回提示信息。"
-            ),
-            parameters=[ToolParameter(
-                name="query",
-                type="string",
-                description="检索的问题或关键词，应具体明确，聚焦单一主题。例：'Transformer 注意力机制' 而非 '介绍一下深度学习的各种模型'"
-            )]
+            description="检索本次允许的本地文献，返回带稳定 evidence_id、版本与位置的原文片段。",
+            parameters=[ToolParameter(name="query", type="string", description="具体问题或关键词")],
         )
-        self.pipeline = pipeline
+        self._retrieval, self._policy, self._record = retrieval, policy, record
 
-    def run_tool(self, parameters: dict[str, Any]) -> str:
-        query = parameters["query"]
-        result = self.pipeline.retrieve(query)
-        
-        if not result.strip():
-            return "本地知识库中未找到相关内容"
-        
-        return result
+    def run_tool(self, parameters):
+        # Model arguments cannot override the run's document scope.
+        evidence = self._retrieval.retrieve_sync(parameters["query"], self._policy)
+        for item in evidence:
+            self._record(item)
+        return "\n\n".join(
+            f"[{item.evidence_id}] document={item.document_id} section={item.section}\n{item.original_text}"
+            for item in evidence
+        ) or "本次允许的本地资料中未找到相关内容"

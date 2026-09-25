@@ -1,23 +1,29 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
-import os
+import re
 import threading
+from pathlib import Path
 
 from sage_scholar.config import Config
 from sage_scholar.domain import EvidenceRef
+from sage_scholar.domain.documents import IngestionStatus
+from sage_scholar.domain.execution import SourcePolicy
 from sage_scholar.rag import Pipeline
+
+from .document_store import JsonDocumentStore
+from .evidence_store import JsonEvidenceStore
 
 
 class LegacyRetrievalAdapter:
-    """Expose the migrated hybrid retriever through a structured Evidence API."""
+    """Shared QA/Research adapter over the original hybrid retrieval pipeline."""
 
-    def __init__(self, config: Config, pipeline: Pipeline | None = None):
+    def __init__(self, config: Config, pipeline: Pipeline | None = None, documents=None, evidence_store=None):
         self._config = config
         self._pipeline = pipeline
         self._lock = threading.Lock()
+        self.documents = documents or JsonDocumentStore(config.data_dir)
+        self.evidence_store = evidence_store or JsonEvidenceStore(config.data_dir)
 
     @property
     def pipeline(self) -> Pipeline:
@@ -27,43 +33,70 @@ class LegacyRetrievalAdapter:
                     self._pipeline = Pipeline(data_dir=self._config.data_dir)
         return self._pipeline
 
-    async def retrieve(
-        self,
-        query: str,
-        *,
-        document_ids: list[str],
-        top_k: int = 5,
-    ) -> list[EvidenceRef]:
-        return await asyncio.to_thread(self._retrieve_sync, query, document_ids, top_k)
+    def permitted_documents(self, policy: SourcePolicy):
+        return [
+            doc for doc in self.documents.list()
+            if doc.ingestion_status == IngestionStatus.READY
+            and doc.converted_path and policy.permits_document(doc.document_id)
+        ]
 
-    def _retrieve_sync(self, query: str, document_ids: list[str], top_k: int) -> list[EvidenceRef]:
-        allowed_paths = self._resolve_document_paths(document_ids)
-        results = self.pipeline.retrieve_chunks(query, top_k=top_k, allowed_file_paths=allowed_paths)
+    async def retrieve(self, query: str, *, policy: SourcePolicy, top_k: int = 5) -> list[EvidenceRef]:
+        return await asyncio.to_thread(self.retrieve_sync, query, policy, top_k)
+
+    def retrieve_sync(self, query: str, policy: SourcePolicy, top_k: int = 5) -> list[EvidenceRef]:
+        docs = {doc.converted_path: doc for doc in self.permitted_documents(policy)}
+        if not docs:
+            return []
+        # Restrict candidates before BM25/vector scoring, then defensively validate returned paths.
+        results = self.pipeline.retrieve_chunks(query, top_k=top_k, allowed_file_paths=set(docs))
         evidence = []
         for chunk, score in results:
-            identity = f"{chunk.file_path}:{chunk.chunk_idx}:{chunk.content}"
-            evidence.append(
-                EvidenceRef(
-                    evidence_id=hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24],
-                    source_id=chunk.file_path,
-                    text=chunk.content,
-                    score=score,
-                    metadata={"chunk_index": str(chunk.chunk_idx)},
-                )
-            )
-        return evidence
+            doc = docs.get(chunk.file_path)
+            if doc is None:
+                continue
+            item = self._evidence(doc, chunk.content, score=score, chunk_index=chunk.chunk_idx,
+                                  location={"chunk_index": chunk.chunk_idx})
+            evidence.append(item)
+            # Read the containing section when the legacy chunk can be located unambiguously.
+            matching = [
+                section for section in self._sections(doc)
+                if re.sub(r"\s+", "", chunk.content) in re.sub(r"\s+", "", section.original_text)
+            ]
+            if len(matching) == 1 and matching[0].original_text != chunk.content:
+                evidence.append(matching[0])
+        return list({item.evidence_id: item for item in evidence}.values())
 
-    def _resolve_document_paths(self, document_ids: list[str]) -> set[str] | None:
-        if not document_ids:
-            return None
-        index_path = os.path.join(self._config.data_dir, "index.json")
-        if not os.path.exists(index_path):
-            return set()
-        with open(index_path, "r", encoding="utf-8") as file:
-            entries = json.load(file)
-        requested = set(document_ids)
-        return {
-            entry["converted_path"]
-            for entry in entries
-            if entry.get("title") in requested or entry.get("converted_path") in requested
-        }
+    async def read_documents(self, *, policy: SourcePolicy) -> list[EvidenceRef]:
+        return await asyncio.to_thread(self.read_documents_sync, policy)
+
+    def read_documents_sync(self, policy: SourcePolicy) -> list[EvidenceRef]:
+        return [section for doc in self.permitted_documents(policy) for section in self._sections(doc)]
+
+    def _sections(self, doc) -> list[EvidenceRef]:
+        text = Path(doc.converted_path).read_text(encoding="utf-8")
+        headings = list(re.finditer(r"(?m)^#{1,6}\s+(.+)$", text))
+        starts = sorted(set([0, *[match.start() for match in headings]]))
+        titles = {match.start(): match.group(1) for match in headings}
+        result = []
+        for index, start in enumerate(starts):
+            end = starts[index + 1] if index + 1 < len(starts) else len(text)
+            for offset in range(start, end, 6000):
+                part_end = min(end, offset + 6000)
+                original = text[offset:part_end]
+                if original.strip():
+                    result.append(self._evidence(
+                        doc, original, section=titles.get(start),
+                        location={"char_start": offset, "char_end": part_end},
+                    ))
+        return result
+
+    def _evidence(self, doc, original_text, **values):
+        item = EvidenceRef.create(
+            source_id=doc.source_identifier, document_id=doc.document_id,
+            source_version=doc.document_version, parser_version=doc.parser_version,
+            original_text=original_text, page=None,
+            metadata={"title": doc.title, "converted_path": doc.converted_path},
+            **values,
+        )
+        self.evidence_store.save(item)
+        return item

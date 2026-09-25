@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Callable
 
 from .ports import EventEmitter
+from sage_scholar.domain.execution import ExecutionRequest, RunOutcome
 
 
 class ResearchService:
@@ -12,16 +13,16 @@ class ResearchService:
     def __init__(self, runtime_provider):
         self._runtime_provider = runtime_provider
 
-    async def run(self, query: str, emit: EventEmitter, cancelled: Callable[[], bool]) -> dict:
+    async def run(self, request: ExecutionRequest, emit: EventEmitter, cancelled: Callable[[], bool]) -> RunOutcome:
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
         sentinel = object()
 
         def produce() -> None:
             try:
-                runtime = self._runtime_provider.get()
+                runtime = self._runtime_provider.get(require_external=request.source_policy.permits_web)
                 usage_before = runtime.usage_snapshot()
-                for raw_event in runtime.run_research(query):
+                for raw_event in runtime.run_research(request):
                     if cancelled():
                         break
                     event = runtime.to_public_event(raw_event)
@@ -40,6 +41,8 @@ class ResearchService:
 
         producer = asyncio.create_task(asyncio.to_thread(produce))
         final_report: str | None = None
+        remaining_gaps = []
+        evidence_ids = []
         try:
             while True:
                 item = await queue.get()
@@ -50,8 +53,19 @@ class ResearchService:
                 event_type, data = item
                 if event_type == "write":
                     final_report = data.get("report")
+                if event_type == "outcome":
+                    remaining_gaps = data.get("remaining_gaps", [])
+                if event_type == "evidence":
+                    evidence_ids = data.get("evidence_ids", [])
                 await emit(event_type, data)
         finally:
             await producer
 
-        return {"report": final_report} if final_report else {}
+        if not final_report:
+            remaining_gaps.append("未生成研究报告")
+        return RunOutcome(
+            status="partial" if remaining_gaps else "completed",
+            result={"report": final_report, "evidence_ids": evidence_ids},
+            reason="研究仍有未覆盖项" if remaining_gaps else None,
+            remaining_gaps=remaining_gaps,
+        )

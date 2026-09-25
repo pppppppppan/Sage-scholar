@@ -29,3 +29,8 @@ def test_unspecified_paper_requires_clarification():
     route = QueryRouter().route("这篇论文用了什么数据集？")
     assert route.workflow is Workflow.QA
     assert route.needs_clarification is True
+
+
+def test_explicit_no_web_in_text_cannot_be_overridden_by_default_allow_flag():
+    route = QueryRouter().route("不要联网，调研已有资料", allow_web=True)
+    assert route.allow_web is False

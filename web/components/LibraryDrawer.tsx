@@ -34,18 +34,18 @@ export default function LibraryDrawer() {
     return () => document.removeEventListener("click", handleClick, true);
   }, [confirming]);
 
-  function handleDeleteClick(title: string) {
-    setConfirming(title);
+  function handleDeleteClick(documentId: string) {
+    setConfirming(documentId);
   }
 
-  async function performDelete(title: string) {
-    setDeleting(title);
+  async function performDelete(documentId: string) {
+    setDeleting(documentId);
     try {
-      await deleteDoc(title);
+      await deleteDoc(documentId);
       setConfirming(null);
-      setRemoving(title);
+      setRemoving(documentId);
       setTimeout(() => {
-        setDocs((prev) => prev.filter((d) => d.title !== title));
+        setDocs((prev) => prev.filter((d) => d.document_id !== documentId));
         setRemoving(null);
       }, 300);
     } finally {
@@ -60,14 +60,17 @@ export default function LibraryDrawer() {
     try {
       for (const file of Array.from(files)) {
         const result = await uploadFile(file);
-        const key = result.title + "_" + Date.now();
+        const key = result.document_id;
         const newDoc: LibraryDoc = {
           title: result.title,
+          document_id: result.document_id,
+          document_version: result.document_version,
+          ingestion_status: result.ingestion_status,
           source_type: "upload",
           added_at: new Date().toISOString(),
         };
         setEntering((prev) => new Set(prev).add(key));
-        setDocs((prev) => [{ ...newDoc, _key: key } as LibraryDoc & { _key: string }, ...prev]);
+        setDocs((prev) => [newDoc, ...prev.filter((doc) => doc.document_id !== newDoc.document_id)]);
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             setEntering((prev) => {
@@ -142,10 +145,10 @@ export default function LibraryDrawer() {
             <p className="text-[13px] text-muted-foreground px-2 py-4">暂无文献</p>
           )}
           {docs.map((doc) => {
-            const key = (doc as LibraryDoc & { _key?: string })._key || doc.title;
-            const isRemoving = removing === doc.title;
+            const key = doc.document_id;
+            const isRemoving = removing === doc.document_id;
             const isEntering = entering.has(key);
-            const isConfirming = confirming === doc.title;
+            const isConfirming = confirming === doc.document_id;
             return (
               <div
                 key={key}
@@ -170,7 +173,7 @@ export default function LibraryDrawer() {
                   <div className="absolute right-0 top-2 w-10 flex justify-center">
                     {/* Trash icon */}
                     <button
-                      onClick={() => handleDeleteClick(doc.title)}
+                      onClick={() => handleDeleteClick(doc.document_id)}
                       className={`p-1 text-muted-foreground hover:text-error active:scale-90 transition-opacity duration-150 ${
                         isConfirming ? "opacity-0 pointer-events-none" : "opacity-0 group-hover:opacity-100"
                       }`}
@@ -196,11 +199,11 @@ export default function LibraryDrawer() {
                         取消
                       </button>
                       <button
-                        onClick={() => performDelete(doc.title)}
-                        disabled={deleting === doc.title}
+                        onClick={() => performDelete(doc.document_id)}
+                        disabled={deleting === doc.document_id}
                         className="text-[11px] text-error px-1.5 py-0.5 rounded hover:bg-error/10 active:scale-95"
                       >
-                        {deleting === doc.title ? (
+                        {deleting === doc.document_id ? (
                           <span className="block w-3 h-3 mx-auto border border-current border-t-transparent rounded-full animate-spin" />
                         ) : "删除"}
                       </button>

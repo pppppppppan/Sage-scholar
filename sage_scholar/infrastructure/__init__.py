@@ -1,3 +1,1 @@
-from .container import ApplicationContainer
-
-__all__ = ["ApplicationContainer"]
+"""Infrastructure adapters; dependencies are assembled in container.py."""

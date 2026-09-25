@@ -21,11 +21,12 @@ class ApplicationContainer:
         self.config = config or Config()
         self.model_gateway = LegacyModelGateway(self.config)
         self.retrieval = LegacyRetrievalAdapter(self.config)
+        self.evidence_store = self.retrieval.evidence_store
         self.run_manager = RunManager(max_concurrent_runs=1)
         self.runtime_provider = ResearchRuntimeProvider(
             self.config,
             llm_client_factory=lambda: self.model_gateway.client,
-            pipeline_factory=lambda: self.retrieval.pipeline,
+            retrieval=self.retrieval,
         )
         self.research_service = ResearchService(self.runtime_provider)
         self.document_service = DocumentService(

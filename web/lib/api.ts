@@ -11,6 +11,9 @@ export type Workflow =
 export interface EvidenceRef {
   evidence_id: string;
   source_id: string;
+  document_id: string | null;
+  original_text: string;
+  location: Record<string, unknown>;
   source_version: string;
   text: string;
   page: number | null;
@@ -18,7 +21,7 @@ export interface EvidenceRef {
   table: string | null;
   parser_version: string;
   score: number | null;
-  metadata: Record<string, string>;
+  metadata: Record<string, unknown>;
 }
 
 export interface QueryResponse {
@@ -36,6 +39,9 @@ export interface QueryResponse {
   status: "inline" | "accepted" | "needs_clarification" | "not_implemented";
   answer: string | null;
   evidence: EvidenceRef[];
+  citations: Record<string, string>;
+  citation_issues: string[];
+  reading_strategy: "targeted" | "overview" | null;
   run_id: string | null;
   message: string | null;
 }
@@ -70,11 +76,17 @@ export async function submitQuery(
 }
 
 export interface SaveReportResult {
+  document_id: string;
+  document_version: string;
+  ingestion_status: LibraryDoc["ingestion_status"];
   title: string;
   status: "skipped" | "overwritten" | "created";
 }
 
 export interface LibraryDoc {
+  document_id: string;
+  document_version: string;
+  ingestion_status: "uploaded" | "parsing" | "indexing" | "ready" | "failed";
   title: string;
   source_type: string;
   added_at: string;
@@ -94,8 +106,8 @@ export async function listDocs(): Promise<LibraryDoc[]> {
   return expectJson<LibraryDoc[]>(response);
 }
 
-export async function deleteDoc(title: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/api/library/${encodeURIComponent(title)}`, {
+export async function deleteDoc(documentId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/library/${encodeURIComponent(documentId)}`, {
     method: "DELETE",
   });
   if (!response.ok) throw new Error(`删除失败 (${response.status})`);
@@ -117,6 +129,8 @@ export type ResearchEvent =
   | { type: "review"; round: number; review_summary: { question: string; verdict: string; failed: Record<string, boolean>; evidence?: Record<string, string> }[]; missing_dimensions?: string }
   | { type: "write"; report: string }
   | { type: "stats"; total_calls: number; prompt_tokens: number; completion_tokens: number; total_tokens: number }
+  | { type: "run_finished"; status: "completed" | "partial"; reason: string | null; remaining_gaps: string[] }
+  | { type: "run_cancelled" | "run_interrupted" }
   | { type: "error"; message: string };
 
 export function startRunEvents(
@@ -151,7 +165,7 @@ export function startRunEvents(
             if (
               eventType &&
               data &&
-              ["plan", "research", "review", "write", "stats", "error"].includes(eventType)
+              ["plan", "research", "review", "write", "stats", "run_finished", "run_cancelled", "run_interrupted", "error"].includes(eventType)
             ) {
               onEvent({ type: eventType, ...JSON.parse(data) } as ResearchEvent);
             }

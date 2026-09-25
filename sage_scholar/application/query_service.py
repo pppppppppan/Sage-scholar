@@ -5,6 +5,7 @@ from enum import StrEnum
 import uuid
 
 from sage_scholar.domain import EvidenceRef
+from sage_scholar.domain.execution import ExecutionRequest
 from sage_scholar.routing import QueryRouter, RouteDecision, SourceScope, Workflow
 from sage_scholar.runtime import RunManager
 
@@ -29,6 +30,10 @@ class QueryCommand:
     allow_web: bool | None = None
     timezone: str = "Asia/Shanghai"
     history: list[dict[str, str]] = field(default_factory=list)
+    conversation_id: str | None = None
+    session_id: str | None = None
+    budget: dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -40,6 +45,9 @@ class QueryResult:
     evidence: list[EvidenceRef] = field(default_factory=list)
     run_id: str | None = None
     message: str | None = None
+    citations: dict[int, str] = field(default_factory=dict)
+    citation_issues: list[str] = field(default_factory=list)
+    reading_strategy: str | None = None
 
 
 class QueryService:
@@ -74,23 +82,34 @@ class QueryService:
                 message=route.clarification_message,
             )
 
+        execution = ExecutionRequest(
+            **route.model_dump(include={
+                "workflow", "source_scope", "document_ids", "allow_web", "execution_mode",
+            }),
+            query=command.query, request_id=request_id, timezone=command.timezone,
+            history=command.history, conversation_id=command.conversation_id,
+            session_id=command.session_id, budget=command.budget, metadata=command.metadata,
+        )
+
         if route.workflow is Workflow.DIRECT:
-            answer = await self._direct.answer(command.query, command.timezone, command.history)
+            answer = await self._direct.answer(execution)
             return QueryResult(request_id=request_id, route=route, status=QueryStatus.INLINE, answer=answer)
 
         if route.workflow is Workflow.QA:
-            result = await self._qa.answer(command.query, route.document_ids)
+            result = await self._qa.answer(execution)
             return QueryResult(
                 request_id=request_id,
                 route=route,
                 status=QueryStatus.INLINE,
                 answer=result.answer,
                 evidence=result.evidence,
+                citations=result.citations, citation_issues=result.citation_issues,
+                reading_strategy=result.reading_strategy,
             )
 
         runner = self._long_runners.get(route.workflow)
         if runner is not None:
-            run = await self._run_manager.start(route.workflow, command.query, runner)
+            run = await self._run_manager.start(execution, runner)
             return QueryResult(
                 request_id=request_id,
                 route=route,

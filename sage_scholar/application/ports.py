@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 from sage_scholar.domain import EvidenceRef
+from sage_scholar.domain.execution import ExecutionRequest, SourcePolicy, RunOutcome
 
 
 class ModelGateway(Protocol):
@@ -21,13 +22,15 @@ class RetrievalService(Protocol):
         self,
         query: str,
         *,
-        document_ids: list[str],
+        policy: SourcePolicy,
         top_k: int = 5,
     ) -> list[EvidenceRef]: ...
+
+    async def read_documents(self, *, policy: SourcePolicy) -> list[EvidenceRef]: ...
 
 
 EventEmitter = Callable[[str, dict], Awaitable[None]]
 
 
 class LongTaskRunner(Protocol):
-    async def run(self, query: str, emit: EventEmitter, cancelled: Callable[[], bool]) -> dict: ...
+    async def run(self, request: ExecutionRequest, emit: EventEmitter, cancelled: Callable[[], bool]) -> RunOutcome: ...

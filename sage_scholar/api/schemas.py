@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 from sage_scholar.domain import EvidenceRef
+from sage_scholar.domain.documents import IngestResult
 from sage_scholar.routing import RouteDecision, SourceScope, Workflow
 from sage_scholar.runtime import RunSnapshot
 
@@ -21,6 +22,10 @@ class QueryRequest(BaseModel):
     document_ids: list[str] = Field(default_factory=list)
     allow_web: bool | None = None
     timezone: str = "Asia/Shanghai"
+    conversation_id: str | None = None
+    session_id: str | None = None
+    budget: dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
     history: list[ChatMessage] = Field(default_factory=list, max_length=20)
 
     @field_validator("query")
@@ -40,6 +45,9 @@ class QueryResponse(BaseModel):
     evidence: list[EvidenceRef] = Field(default_factory=list)
     run_id: str | None = None
     message: str | None = None
+    citations: dict[int, str] = Field(default_factory=dict)
+    citation_issues: list[str] = Field(default_factory=list)
+    reading_strategy: str | None = None
 
 
 class IngestRequest(BaseModel):
@@ -51,11 +59,6 @@ class IngestRequest(BaseModel):
 class SaveReportRequest(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     content: str = Field(min_length=1)
-
-
-class IngestResult(BaseModel):
-    title: str
-    status: Literal["skipped", "overwritten", "created"]
 
 
 class RunResponse(BaseModel):

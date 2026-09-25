@@ -209,9 +209,26 @@ export default function ResearchProgress({
             completion_tokens: event.completion_tokens,
             total_tokens: event.total_tokens,
           };
-          if (reportRef.current) {
-            onReportRef.current(reportRef.current, statsRef.current);
-          }
+          break;
+
+        case "run_finished": {
+          const gaps = event.remaining_gaps.map((gap) => `- ${gap}`).join("\n");
+          const notice = event.status === "partial"
+            ? `> 本次研究部分完成：${event.reason || "仍有未覆盖内容"}\n\n${gaps}\n\n`
+            : "";
+          onReportRef.current(
+            notice + (reportRef.current || "本次未生成研究报告。"),
+            statsRef.current,
+          );
+          break;
+        }
+
+        case "run_cancelled":
+        case "run_interrupted":
+          onReportRef.current(
+            reportRef.current || (event.type === "run_cancelled" ? "研究已取消。" : "研究已中断。"),
+            statsRef.current,
+          );
           break;
 
         case "error":
