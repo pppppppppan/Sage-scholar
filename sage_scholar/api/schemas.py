@@ -51,12 +51,14 @@ class QueryResponse(BaseModel):
 
 
 class IngestRequest(BaseModel):
+    document_id: str | None = None
     src: str
     custom_title: str | None = None
     overwrite: bool = True
 
 
 class SaveReportRequest(BaseModel):
+    document_id: str | None = None
     title: str = Field(min_length=1, max_length=300)
     content: str = Field(min_length=1)
 

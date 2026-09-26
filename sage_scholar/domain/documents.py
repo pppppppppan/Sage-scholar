@@ -20,6 +20,16 @@ class IngestionStatus(StrEnum):
     FAILED = "failed"
 
 
+class DocumentVersion(BaseModel):
+    document_version: str
+    version_number: int
+    content_hash: str | None = None
+    parser_version: str
+    original_path: str | None = None
+    converted_path: str
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class DocumentRecord(BaseModel):
     document_id: str = Field(default_factory=lambda: "doc_" + uuid4().hex)
     title: str
@@ -27,6 +37,9 @@ class DocumentRecord(BaseModel):
     original_path: str | None = None
     converted_path: str | None = None
     document_version: str = "pending"
+    content_hash: str | None = None
+    active_version: str | None = None
+    versions: list[DocumentVersion] = Field(default_factory=list)
     parser_version: str = "unknown"
     ingestion_status: IngestionStatus = IngestionStatus.UPLOADED
     created_at: datetime = Field(default_factory=utc_now)
@@ -39,4 +52,6 @@ class IngestResult(BaseModel):
     status: Literal["skipped", "overwritten", "created"]
     document_id: str
     document_version: str
+    content_hash: str | None = None
+    active_version: str | None = None
     ingestion_status: IngestionStatus

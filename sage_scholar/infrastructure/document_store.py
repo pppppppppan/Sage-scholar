@@ -4,7 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from sage_scholar.domain.documents import DocumentRecord, IngestionStatus
+from sage_scholar.domain.documents import DocumentRecord, DocumentVersion, IngestionStatus
 
 from .json_store import file_lock, write_json
 
@@ -39,6 +39,18 @@ class JsonDocumentStore:
                     migrated = True
                 else:
                     doc = DocumentRecord.model_validate(entry)
+                # Upgrade the former single-version catalog without rewriting evidence IDs.
+                if "versions" not in entry and doc.ingestion_status == IngestionStatus.READY and doc.converted_path:
+                    doc.active_version = doc.document_version
+                    original = Path(doc.original_path) if doc.original_path else None
+                    doc.content_hash = hashlib.sha256(original.read_bytes()).hexdigest() if original and original.is_file() else None
+                    doc.versions = [DocumentVersion(
+                        document_version=doc.document_version, version_number=1,
+                        content_hash=doc.content_hash, parser_version=doc.parser_version,
+                        original_path=doc.original_path, converted_path=doc.converted_path,
+                        created_at=doc.created_at,
+                    )]
+                    migrated = True
                 result.append(doc)
             if migrated:
                 self._write(result)

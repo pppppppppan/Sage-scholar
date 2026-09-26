@@ -120,11 +120,18 @@ def test_failed_replacement_preserves_ready_old_version(library):
     manager, adapter, a, b, source, pipeline = library
     old = manager.store.get(a.document_id)
     pipeline.fail = True
+    source.write_text("updated contents requiring a new index")
     with pytest.raises(RuntimeError, match="embedding failed"):
         manager.ingest(str(source))
     current = manager.store.get(a.document_id)
     assert current.converted_path == old.converted_path
-    assert current.ingestion_status == IngestionStatus.READY
+    # Latest attempt failed, while the previously ready version remains active and retrievable.
+    assert current.ingestion_status == IngestionStatus.FAILED
+    assert current.active_version == old.active_version
+    result = asyncio.run(adapter.retrieve("method", policy=SourcePolicy(
+        source_scope=SourceScope.SELECTED_DOCUMENTS, document_ids=(a.document_id,),
+    )))
+    assert result and all(item.source_version == old.document_version for item in result)
     assert "embedding failed" in current.metadata["ingestion_error"]
     assert any(chunk.file_path == old.converted_path for chunk in pipeline.vector_store.chunks)
 

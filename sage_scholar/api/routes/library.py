@@ -1,7 +1,8 @@
 import os
 import shutil
 import tempfile
-from fastapi import APIRouter, HTTPException, UploadFile
+from uuid import uuid4
+from fastapi import APIRouter, Form, HTTPException, UploadFile
 from ..dependencies import Container
 from ..schemas import IngestRequest, IngestResult, SaveReportRequest
 
@@ -17,13 +18,13 @@ async def ingest_document(body: IngestRequest, container: Container):
         return await container.document_service.ingest(
             body.src,
             custom_title=body.custom_title,
-            overwrite=body.overwrite,
+            overwrite=body.overwrite, document_id=body.document_id,
         )
     except (ValueError, RuntimeError, OSError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 @router.post("/api/library/upload", response_model=IngestResult)
-async def upload_document(file: UploadFile, container: Container):
+async def upload_document(file: UploadFile, container: Container, document_id: str | None = Form(None)):
     filename = (file.filename or "upload.pdf").replace("/", "_").replace("\\", "_")
     os.makedirs(container.config.data_dir, exist_ok=True)
     temp_dir = tempfile.mkdtemp(dir=container.config.data_dir)
@@ -32,7 +33,10 @@ async def upload_document(file: UploadFile, container: Container):
         with open(source, "wb") as output:
             while chunk := await file.read(1024 * 1024):
                 output.write(chunk)
-        return await container.document_service.ingest(source, overwrite=True)
+        return await container.document_service.ingest(
+            source, overwrite=True, document_id=document_id,
+            source_identifier="upload:" + uuid4().hex,
+        )
     except (ValueError, RuntimeError, OSError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
@@ -50,7 +54,8 @@ async def save_report(body: SaveReportRequest, container: Container):
         return await container.document_service.ingest(
             source,
             custom_title=body.title,
-            overwrite=True,
+            overwrite=True, document_id=body.document_id,
+            source_identifier="report:" + uuid4().hex,
         )
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

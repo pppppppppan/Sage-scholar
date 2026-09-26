@@ -1,6 +1,8 @@
 import math
 
 import json
+from pathlib import Path
+from sage_scholar.infrastructure.json_store import write_json
 import jieba
 from rank_bm25 import BM25Okapi
 
@@ -94,8 +96,7 @@ class VectorStore:
 
     def save_to_json(self, file_path: str):
         chunk_dicts = [chunk.model_dump() for chunk in self.chunks]
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(chunk_dicts, f, ensure_ascii=False)
+        write_json(Path(file_path), chunk_dicts)
 
     @classmethod
     def load_json(cls, file_path: str) -> VectorStore:

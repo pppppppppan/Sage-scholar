@@ -21,7 +21,8 @@ class DocumentService:
             lambda: [self._store.to_legacy_dict(doc) for doc in self._store.list()]
         )
 
-    async def ingest(self, source: str, custom_title: str | None = None, overwrite: bool = True):
+    async def ingest(self, source: str, custom_title: str | None = None, overwrite: bool = True, *,
+                     document_id: str | None = None, source_identifier: str | None = None):
         suffix = Path(source).suffix.lower()
         if suffix in {".md", ".markdown", ".txt"}:
             manager = await asyncio.to_thread(self._local_manager)
@@ -30,6 +31,7 @@ class DocumentService:
                 source,
                 custom_title,
                 overwrite,
+                document_id=document_id, source_identifier=source_identifier,
             )
         runtime = await asyncio.to_thread(self._runtime_provider.get)
         manager = await asyncio.to_thread(runtime.create_library_manager)
@@ -40,6 +42,7 @@ class DocumentService:
             source,
             custom_title,
             overwrite,
+            document_id=document_id, source_identifier=source_identifier,
         )
 
     async def delete(self, title: str) -> None:

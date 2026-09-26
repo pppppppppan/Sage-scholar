@@ -7,7 +7,6 @@ from pathlib import Path
 
 from sage_scholar.config import Config
 from sage_scholar.domain import EvidenceRef
-from sage_scholar.domain.documents import IngestionStatus
 from sage_scholar.domain.execution import SourcePolicy
 from sage_scholar.rag import Pipeline
 
@@ -36,7 +35,7 @@ class LegacyRetrievalAdapter:
     def permitted_documents(self, policy: SourcePolicy):
         return [
             doc for doc in self.documents.list()
-            if doc.ingestion_status == IngestionStatus.READY
+            if doc.active_version is not None
             and doc.converted_path and policy.permits_document(doc.document_id)
         ]
 
