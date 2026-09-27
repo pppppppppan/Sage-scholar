@@ -6,7 +6,7 @@ from sage_scholar.application.qa_service import QAService
 from sage_scholar.application.query_service import QueryService
 from sage_scholar.application.research_service import ResearchService
 from sage_scholar.config import Config
-from sage_scholar.research import ResearchRuntimeProvider
+from sage_scholar.research.runtime import ResearchRuntimeProvider
 from sage_scholar.routing import QueryRouter, Workflow
 from sage_scholar.runtime import RunManager
 

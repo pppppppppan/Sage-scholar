@@ -15,6 +15,7 @@ class BaseTool(ABC):
     """工具基类"""
     # Unknown tools are denied until their source capability is declared.
     source_access = "unknown"
+    evidence_kind = "observation"
     def __init__(self, name: str, description: str, parameters: list[ToolParameter]):
         self.name = name
         self.description = description

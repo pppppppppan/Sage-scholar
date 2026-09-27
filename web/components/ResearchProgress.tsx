@@ -13,6 +13,7 @@ interface SubQuestionInfo {
 }
 
 interface CompletedEntry {
+  status?: "completed" | "failed";
   preview: string;
   tool_call_counts: Record<string, number>;
 }
@@ -38,6 +39,7 @@ interface ReviewNode {
 interface WriteNode {
   kind: "write";
   done: boolean;
+  phase?: string;
 }
 
 type TimelineNode = PlanNode | ResearchNode | ReviewNode | WriteNode;
@@ -89,6 +91,14 @@ export default function ResearchProgress({
           break;
         }
 
+        case "research_task_started":
+          setNodes((prev) => {
+            const last = prev[prev.length - 1];
+            if (last?.kind !== "plan") return prev;
+            return [...prev, { kind: "research", sub_questions: last.sub_questions, completed: new Map() }];
+          });
+          break;
+
         case "research":
           setNodes((prev) => {
             const next = [...prev];
@@ -97,6 +107,7 @@ export default function ResearchProgress({
               const updated = new Map(last.completed);
               updated.set(event.question, {
                 preview: event.preview,
+                status: event.status,
                 tool_call_counts: event.tool_call_counts,
               });
               const exists = last.sub_questions.some(
@@ -117,6 +128,7 @@ export default function ResearchProgress({
                     const updated = new Map(rn.completed);
                     updated.set(event.question, {
                       preview: event.preview,
+                status: event.status,
                       tool_call_counts: event.tool_call_counts,
                     });
                     next[j] = { ...rn, completed: updated };
@@ -132,6 +144,7 @@ export default function ResearchProgress({
                 const completed = new Map<string, CompletedEntry>();
                 completed.set(event.question, {
                   preview: event.preview,
+                status: event.status,
                   tool_call_counts: event.tool_call_counts,
                 });
                 next.push({ kind: "research", sub_questions: subs, completed });
@@ -148,7 +161,8 @@ export default function ResearchProgress({
               return prev;
             }
             const hasRevise = event.review_summary.some((r) => r.verdict === "revise");
-            const allApproved = event.review_summary.every((r) => r.verdict === "approved");
+            const allApproved = event.review_summary.length > 0 && !event.missing_dimensions &&
+              event.review_summary.every((r) => r.verdict === "approved");
             const labelMap = new Map<string, string>();
             for (const n of prev) {
               if (n.kind === "plan") {
@@ -183,6 +197,25 @@ export default function ResearchProgress({
                 next.push({ kind: "research", sub_questions: retryQuestions, completed: new Map() });
               }
             }
+            return next;
+          });
+          break;
+        }
+
+        case "report_drafting":
+        case "citation_verifying":
+        case "report_revising": {
+          const phase = event.type === "report_revising"
+            ? `正在修订报告（第 ${event.revision} 次）`
+            : event.type === "citation_verifying"
+              ? (event.phase === "started" ? "正在逐条核验主张与证据" : "引用核验已完成")
+              : (event.phase === "started" ? "正在撰写研究报告" : "报告草稿已生成，准备核验引用");
+          setNodes((prev) => {
+            const next = [...prev];
+            const index = next.findIndex((n) => n.kind === "write");
+            const node: WriteNode = { kind: "write", done: false, phase };
+            if (index >= 0) next[index] = node;
+            else next.push(node);
             return next;
           });
           break;
@@ -287,7 +320,7 @@ export default function ResearchProgress({
   // replan pending: review has revise items, waiting for new plan
   const showReplanPending =
     lastNode?.kind === "review" &&
-    lastNode.results.some((r) => r.verdict === "revise");
+    (Boolean(lastNode.missing_dimensions) || lastNode.results.some((r) => r.verdict === "revise"));
 
   function toggleExpand(index: number) {
     const nodeEl = document.querySelector(`[data-node-idx="${index}"]`) as HTMLElement | null;
@@ -352,7 +385,7 @@ export default function ResearchProgress({
                   </div>
                   {!node.done && (
                     <div className="mt-2">
-                      <StreamingText text="正在撰写研究报告" mode="dots" />
+                      <StreamingText text={node.phase || "正在撰写研究报告"} mode="dots" />
                     </div>
                   )}
                 </NodeBubble>
@@ -568,6 +601,8 @@ function nodeSummary(node: TimelineNode): string {
       return `${node.completed.size}/${node.sub_questions.length} 完成`;
     case "review": {
       const approved = node.results.filter((r) => r.verdict === "approved").length;
+      if (node.missing_dimensions) return "有待核实的缺口";
+      if (node.results.length === 0) return "覆盖与证据检查完成";
       if (approved === node.results.length) return "全部通过";
       return `${approved}/${node.results.length} 通过`;
     }
@@ -618,6 +653,7 @@ function NodeContent({
           {node.sub_questions.map((sq, i) => {
             const entry = node.completed.get(sq.question);
             const isDone = entry !== undefined;
+            const isFailed = entry?.status === "failed";
             const toolUsage = entry ? formatToolUsage(entry.tool_call_counts) : null;
             const subKey = `${index}-${i}`;
             // current round: expanded unless explicitly collapsed
@@ -645,9 +681,9 @@ function NodeContent({
                     <path d="M5 2.5l3 3.5-3 3.5" />
                   </svg>
                   <StatusLabel
-                    dot={isDone ? "bg-approved" : "bg-accent animate-pulse-dot"}
-                    text={isDone ? "已完成" : "研究中"}
-                    color={isDone ? "text-approved" : "text-accent"}
+                    dot={isFailed ? "bg-error" : isDone ? "bg-approved" : "bg-accent animate-pulse-dot"}
+                    text={isFailed ? "未完成" : isDone ? "已完成" : "研究中"}
+                    color={isFailed ? "text-error" : isDone ? "text-approved" : "text-accent"}
                   />
                   <span className="text-[14px] font-medium">{sq.label}</span>
                 </button>
@@ -719,7 +755,7 @@ function NodeContent({
           {node.missing_dimensions && (
             <div className="mt-3 pt-2.5 border-t border-foreground/8">
               <p className="text-[12px] text-retry leading-snug">
-                <span className="font-medium">缺失维度</span>
+                <span className="font-medium">研究缺口</span>
                 <span className="mx-1">·</span>
                 {node.missing_dimensions}
               </p>
@@ -730,7 +766,7 @@ function NodeContent({
     }
 
     case "write":
-      return node.done ? null : <StreamingText text="正在撰写研究报告" mode="dots" />;
+      return node.done ? null : <StreamingText text={node.phase || "正在撰写研究报告"} mode="dots" />;
   }
 }
 

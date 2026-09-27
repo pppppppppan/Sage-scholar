@@ -25,9 +25,13 @@ class ResearchService:
                 for raw_event in runtime.run_research(request):
                     if cancelled():
                         break
-                    event = runtime.to_public_event(raw_event)
-                    if event is not None:
-                        asyncio.run_coroutine_threadsafe(queue.put(event), loop).result()
+                    events = (
+                        runtime.to_public_events(raw_event) if hasattr(runtime, "to_public_events")
+                        else [runtime.to_public_event(raw_event)]
+                    )
+                    for event in events:
+                        if event is not None:
+                            asyncio.run_coroutine_threadsafe(queue.put(event), loop).result()
                 usage_after = runtime.usage_snapshot()
                 stats = {
                     key: max(0, value - usage_before.get(key, 0))
@@ -41,6 +45,7 @@ class ResearchService:
 
         producer = asyncio.create_task(asyncio.to_thread(produce))
         final_report: str | None = None
+        report_result = {}
         remaining_gaps = []
         evidence_ids = []
         try:
@@ -53,6 +58,7 @@ class ResearchService:
                 event_type, data = item
                 if event_type == "write":
                     final_report = data.get("report")
+                    report_result = data
                 if event_type == "outcome":
                     remaining_gaps = data.get("remaining_gaps", [])
                 if event_type == "evidence":
@@ -65,7 +71,7 @@ class ResearchService:
             remaining_gaps.append("未生成研究报告")
         return RunOutcome(
             status="partial" if remaining_gaps else "completed",
-            result={"report": final_report, "evidence_ids": evidence_ids},
+            result={**report_result, "report": final_report, "evidence_ids": evidence_ids},
             reason="研究仍有未覆盖项" if remaining_gaps else None,
             remaining_gaps=remaining_gaps,
         )

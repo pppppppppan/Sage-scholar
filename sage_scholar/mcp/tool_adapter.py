@@ -17,6 +17,9 @@ class MCPTool(BaseTool):
         input_schema: dict[str, Any],
         mcp_client: MCPClient
     ):
+        self.evidence_kind = "source_content" if (
+            mcp_client.name == "fetch" and original_name == "fetch"
+        ) else "observation"
         self.original_name = original_name
         self.input_schema = input_schema
         self.mcp_client = mcp_client

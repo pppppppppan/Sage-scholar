@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 class SubQuestion(BaseModel):
+    task_id: str | None = None
+    dependencies: list[str] = Field(default_factory=list)
+    dimensions: list[str] = Field(default_factory=list)
     label: str = Field(description="Short label (under 20 chars) capturing the core topic. For frontend display.")
     question: str = Field(description="The research sub-question.")
     rationale: str = Field(description="Why this sub-question deserves separate investigation.")
@@ -287,3 +290,16 @@ class Supervisor(AgentBase):
         if review_result.missing_dimensions:
             logger.info("[Supervisor] missing_dimensions: %s", review_result.missing_dimensions)
         return review_result
+
+    def plan_tasks(self, contract):
+        from sage_scholar.domain.research import ResearchTask
+        questions = self.plan(contract.model_dump_json() + (
+            "\n以上契约中的 execution 是唯一资料约束，不得放宽。"
+            "每个子任务提供稳定 task_id（T1、T2…）、dependencies（依赖任务 ID）及 dimensions。"
+            "独立任务 dependencies=[] 以便并行；只有需要上游结果时声明依赖，不得循环。"
+            "dimensions 尽量使用契约中的维度名称，必须覆盖用户交付要求。"
+        ))
+        return [ResearchTask(
+            task_id=item.task_id or f"T{index}", objective=item.question,
+            label=item.label, dependencies=item.dependencies, dimensions=item.dimensions,
+        ) for index, item in enumerate(questions, 1)]

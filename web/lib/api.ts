@@ -125,9 +125,17 @@ export async function uploadFile(file: File): Promise<SaveReportResult> {
 
 export type ResearchEvent =
   | { type: "plan"; sub_questions: { label: string; question: string }[] }
-  | { type: "research"; question: string; preview: string; tool_call_counts: Record<string, number> }
+  | { type: "research"; question: string; preview: string; tool_call_counts: Record<string, number>; status?: "completed" | "failed" }
   | { type: "review"; round: number; review_summary: { question: string; verdict: string; failed: Record<string, boolean>; evidence?: Record<string, string> }[]; missing_dimensions?: string }
-  | { type: "write"; report: string }
+  | { type: "write"; report: string; citations?: Record<string, string>; remaining_gaps?: string[] }
+  | { type: "research_planned"; tasks: { task_id: string; objective: string; status: string; revision: number }[] }
+  | { type: "research_task_started"; task_id: string }
+  | { type: "research_task_completed"; note: { task_id: string; evidence_ids: string[]; unknowns: string[]; conflicts: string[] } }
+  | { type: "gap_reviewed"; covered: string[]; missing: string[]; unknowns: string[]; conflicts: string[] }
+  | { type: "report_drafting"; phase: "started" | "completed"; claim_count?: number }
+  | { type: "citation_verifying"; phase: "started" | "completed" }
+  | { type: "report_revising"; revision: number }
+  | { type: "report_completed"; citations: Record<string, string>; remaining_gaps: string[] }
   | { type: "stats"; total_calls: number; prompt_tokens: number; completion_tokens: number; total_tokens: number }
   | { type: "run_finished"; status: "completed" | "partial"; reason: string | null; remaining_gaps: string[] }
   | { type: "run_cancelled" | "run_interrupted" }
@@ -165,7 +173,9 @@ export function startRunEvents(
             if (
               eventType &&
               data &&
-              ["plan", "research", "review", "write", "stats", "run_finished", "run_cancelled", "run_interrupted", "error"].includes(eventType)
+              ["plan", "research", "review", "write", "stats", "run_finished", "run_cancelled", "run_interrupted", "error",
+               "research_planned", "research_task_started", "research_task_completed", "gap_reviewed",
+               "report_drafting", "citation_verifying", "report_revising", "report_completed"].includes(eventType)
             ) {
               onEvent({ type: eventType, ...JSON.parse(data) } as ResearchEvent);
             }

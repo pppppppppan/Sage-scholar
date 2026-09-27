@@ -17,6 +17,16 @@ flowchart LR
     SSE --> UI
 ```
 
+## V3：Deep Research Evidence 化（2026-09-26）
+
+- 研究员保留 ReAct 工具循环，输出结构化 ResearchNote、真实 evidence_ids、unknowns 和 conflicts。
+- 原 LangGraph 增加任务依赖/定向补查、Gap Review、Claim/Evidence 核验和有限 Writer 修订。
+- 搜索摘要、状态和错误仅作为 Observation；明确读取的原文进入 EvidenceStore，报告仍不自动入库。
+- 只将通过来源身份及语义支持核验的 Claim 纳入正文；最终引用由确定性 renderer 编号，Run result 返回 citations → Evidence API 映射。
+- 缺口、预算耗尽或未支持主张产生 PARTIAL；SSE/前端增加撰写、核验、修订阶段。Direct/QA/文档版本与原 HTTP 路径保持兼容。
+- 验证：101 项后端测试通过；compileall、前端 lint/build、diff 检查通过。外部 LLM/MCP 使用测试替身，真实语义质量未评测。
+- 详细实现、预算参数、测试范围和技术债见 [V3 交付说明](docs/v3-research-evidence.md)。文档按既有 .gitignore 仅保留本地。
+
 ## V2.1 修补（2026-09-26）
 
 - 文档身份与内容版本分离：稳定来源或显式 document_id 更新原 Document，版本成功后切换 active_version。
@@ -38,7 +48,7 @@ flowchart LR
 - `Direct`：日期、星期等本地确定性问题不调用模型；其他简单问题通过统一 Model Gateway 回答。
 - 连续对话：回答后保留输入框和本轮消息，最近 20 条用户/助手消息会作为 Direct 追问上下文；点击“新对话”可清空本轮上下文。
 - `QA`：从上传的论文/文档进行 BM25 + 向量检索、RRF、rerank，并以结构化 `EvidenceRef` 返回证据。
-- `Deep Research`：保留 SAGE Research 的 plan → research → review/retry → write LangGraph 流程，改由后台 `Run` 执行并通过 SSE 推送进度。
+- `Deep Research`：复用 SAGE Research 的 LangGraph 与并行 ReAct，现为 contract → task DAG → ResearchNote → gap review/targeted retry → Claim → citation verification/revision → renderer，由后台 `Run` 执行并通过 SSE 推送进度。
 - 研究报告只作为 Run 产物返回，不会自动写回 RAG；仅在用户主动点击保存时进入文档库。
 - 文档库：上传、导入、列表、删除、保存研究报告。
 - 长任务：创建、查询状态、取消、SSE 事件回放；当前状态保存在单进程内存中。
@@ -139,7 +149,7 @@ npm --prefix web run build
 ## 已知边界
 
 - `RunManager` 当前只提供进程内状态和事件回放；服务重启后不能 resume。
-- Deep Research 保留了原项目的基础 Graph，尚未加入持久化 checkpoint、完整 Evidence lineage 和新的 Context Manager。
+- Deep Research 已接入 Note/Claim/Evidence 与引用核验；尚无持久化 checkpoint、完整审计 lineage 和全量 Context Manager。语义核验依赖模型判断，仍需真实样本检验。
 - PDF 证据目前可以带来源、版本和可选 section/page 字段，但旧解析链不能稳定提供逐页定位。
 - Search、Citation Audit、Paper2Code、完整 Eval、Trace/监控和代码沙箱仍待实现。
 - 本阶段没有引入 Redis、Celery、Kafka、独立 Worker、认证或多用户并发体系。

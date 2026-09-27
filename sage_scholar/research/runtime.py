@@ -4,11 +4,19 @@ import json
 import logging
 import os
 import threading
+from pathlib import Path
+from uuid import uuid4
 
 from sage_scholar.agents import Researcher, Supervisor, Writer
 from sage_scholar.base import LLMClient
 from sage_scholar.config import Config
 from sage_scholar.domain.execution import ExecutionRequest
+from sage_scholar.domain.research import ResearchContract
+from sage_scholar.infrastructure.json_store import write_json
+from .budget import ResearchBudget, BudgetedTool
+from .evidence_context import ResearchEvidenceContext
+from .gap_review import GapReviewer
+from .verification import CitationVerifier
 from sage_scholar.infrastructure.retrieval import LegacyRetrievalAdapter
 from sage_scholar.tools.policy import EvidenceTool
 from sage_scholar.context import ContextBuilder, HistoryCompactor, TokenCounter
@@ -59,77 +67,88 @@ class ResearchRuntime:
         self.whitelist = agent_configs["researcher"]["allowed_tools"]
 
     def run_research(self, request: ExecutionRequest):
-        policy = request.source_policy
-        observations = {}
-        observation_lock = threading.Lock()
-
-        def record(evidence):
-            with observation_lock:
-                observations[evidence.evidence_id] = evidence
-
-        def wrap(tool):
-            return EvidenceTool(tool, self.retrieval.evidence_store, record) if tool.source_access == "public" else tool
-
-        tools = self.registry.for_policy(
-            self.whitelist, policy,
-            local_tools=[RAGTool(self.retrieval, policy, record)], wrap=wrap,
+        contract = ResearchContract.from_request(
+            request, max_rounds=self.config.max_rounds, max_steps=self.config.max_steps,
         )
+        policy = contract.source_policy
+        context = ResearchEvidenceContext(self.retrieval.evidence_store, policy, self.retrieval.documents)
+        budget = ResearchBudget(contract.limits.max_tool_calls)
+        observation_run = uuid4().hex
+
+        def make_tools(task_id, observed_ids, issues):
+            def record(evidence):
+                context.register(evidence)
+                observed_ids.add(evidence.evidence_id)
+
+            def observe(observation):
+                if observation.get("kind") == "error":
+                    issues.append(f"{observation['tool']} 返回错误，来源不可访问")
+                write_json(
+                    Path(self.config.data_dir) / "observations" / observation_run / f"{uuid4().hex}.json",
+                    {"task_id": task_id, **observation},
+                )
+
+            def wrap(tool):
+                if tool.source_access == "public":
+                    tool = EvidenceTool(tool, self.retrieval.evidence_store, record, observe)
+                return BudgetedTool(tool, budget)
+
+            return self.registry.for_policy(
+                self.whitelist, policy,
+                local_tools=[RAGTool(self.retrieval, policy, record)], wrap=wrap,
+            )
+
+        available = make_tools("capabilities", set(), [])
         yield {"policy_node": {
             "source_policy": policy.model_dump(mode="json"),
-            "available_tools": [tool.name for tool in tools],
+            "available_tools": [tool.name for tool in available],
         }}
-        if not tools:
+        if not available:
             yield {"outcome_node": {"remaining_gaps": ["资料策略下没有可用工具，无法进行有证据的研究"]}}
             return
-        brief = request.query + "\n\n资料约束：" + policy.model_dump_json()
+
         review_llm = (
             LLMClient(model=self.config.llm.review_model, timeout=self.config.llm.timeout)
-            if self.config.llm.review_model
-            else None
+            if self.config.llm.review_model else self.llm_client
         )
         supervisor = Supervisor(
-            llm=self.llm_client,
-            context_builder=self.context_builder,
-            max_steps=self.config.max_steps,
-            review_llm=review_llm,
+            llm=self.llm_client, context_builder=self.context_builder,
+            max_steps=contract.limits.max_steps, review_llm=review_llm,
         )
         writer = Writer(
-            llm=self.llm_client,
-            context_builder=self.context_builder,
+            llm=self.llm_client, context_builder=self.context_builder, evidence_context=context,
             temperature=self.config.llm.writer_temperature,
         )
 
-        def create_researcher(researcher_id: str = "R-?"):
+        def create_researcher(task_id):
+            observed_ids, issues = set(), []
             return Researcher(
-                name=researcher_id,
-                llm=self.llm_client,
-                context_builder=self.context_builder,
-                tool_list=tools,
-                max_steps=self.config.max_steps,
-                temperature=self.config.llm.research_temperature,
+                name=task_id, llm=self.llm_client, context_builder=self.context_builder,
+                tool_list=make_tools(task_id, observed_ids, issues),
+                max_steps=contract.limits.max_steps, temperature=self.config.llm.research_temperature,
+                evidence_context=context, observed_ids=lambda: sorted(observed_ids),
+                observed_issues=lambda: list(issues),
             )
 
         graph = build_graph(
-            supervisor,
-            create_researcher,
-            writer,
-            max_rounds=self.config.max_rounds,
+            supervisor, create_researcher, writer,
+            gap_reviewer=GapReviewer(review_llm, context),
+            verifier=CitationVerifier(review_llm, context), budget=budget,
         )
-        remaining_gaps = []
-        for event in graph.stream({"research_brief": brief}):
-            if "review_node" in event:
-                review = event["review_node"]
-                remaining_gaps = [
-                    item["question"] for item in review["review_summary"]
-                    if item["verdict"] != "approved"
-                ]
-                if review.get("missing_dimensions"):
-                    remaining_gaps.append(review["missing_dimensions"])
+        final_report = None
+        for _mode, event in graph.stream(
+            {"research_contract": contract},
+            config={"recursion_limit": 20 + 3 * contract.limits.max_tasks * (contract.limits.max_rounds + 1)},
+            stream_mode=["updates", "custom"],
+        ):
+            if "render_node" in event:
+                final_report = event["render_node"]["report_result"]
             yield event
-        if not observations:
-            remaining_gaps.append("研究未收集到可持久化的工具证据")
-        yield {"evidence_node": {"evidence_ids": list(observations)}}
-        yield {"outcome_node": {"remaining_gaps": remaining_gaps}}
+        yield {"evidence_node": {"evidence_ids": context.ids()}}
+        yield {"outcome_node": {
+            "remaining_gaps": final_report.remaining_gaps if final_report else ["研究未生成报告"],
+            "tool_calls_used": budget.used,
+        }}
 
     def create_library_manager(self) -> LibraryManager:
         return LibraryManager(
@@ -148,37 +167,54 @@ class ResearchRuntime:
         }
 
     @staticmethod
-    def to_public_event(event: dict) -> tuple[str, dict] | None:
+    def to_public_events(event):
+        events = []
         for node_name, output in event.items():
-            if node_name == "policy_node":
-                return "source_policy", output
-            if node_name == "evidence_node":
-                return "evidence", output
-            if node_name == "outcome_node":
-                return "outcome", output
-            if node_name == "plan_node":
-                return "plan", {
-                    "sub_questions": [
-                        {"label": item.label, "question": item.question}
-                        for item in output["sub_questions"]
-                    ]
-                }
-            if node_name == "research_node":
-                question, note = output["pending_review_pairs"][0]
-                return "research", {
-                    "question": question,
-                    "preview": note[:150] + ("..." if len(note) > 150 else ""),
-                    "tool_call_counts": output.get("tool_call_counts", {}),
-                }
-            if node_name == "review_node":
-                return "review", {
-                    "round": output["refine_round"],
-                    "review_summary": output["review_summary"],
-                    "missing_dimensions": output.get("missing_dimensions", ""),
-                }
-            if node_name == "write_node":
-                return "write", {"report": output["final_report"]}
-        return None
+            if node_name == "progress_node":
+                events.append((output["event"], {"phase": output["phase"]}))
+            elif node_name in {"policy_node", "evidence_node", "outcome_node"}:
+                name = {"policy_node": "source_policy", "evidence_node": "evidence", "outcome_node": "outcome"}[node_name]
+                events.append((name, output))
+            elif node_name == "plan_node":
+                tasks = list(output.get("tasks", {}).values())
+                events.append(("plan", {"sub_questions": [
+                    {"label": task.label or task.task_id, "question": task.objective}
+                    for task in tasks if task.status == "pending"
+                ]}))
+                events.append(("research_planned", {"tasks": [task.model_dump() for task in tasks]}))
+            elif node_name == "dispatch_node":
+                for identity in output["ready_tasks"]:
+                    events.append(("research_task_started", {"task_id": identity}))
+            elif node_name == "research_node":
+                for note in output["research_notes"].values():
+                    events.append(("research", {
+                        "question": note.question, "preview": "; ".join(f.text for f in note.findings)[:150],
+                        "tool_call_counts": note.tool_usage,
+                        "status": output["tasks"][note.task_id].status,
+                    }))
+                    events.append(("research_task_completed", {"note": note.model_dump()}))
+            elif node_name == "review_node":
+                review = output["gap_review"]
+                events.append(("review", {"round": output["refine_round"], "review_summary": [],
+                                          "missing_dimensions": "; ".join(review.gaps)}))
+                events.append(("gap_reviewed", review.model_dump()))
+            elif node_name == "write_node":
+                events.append(("report_drafting", {"phase": "completed", "claim_count": len(output["draft"].claims)}))
+            elif node_name == "verify_node":
+                events.append(("citation_verifying", {"phase": "completed", **output["verification_result"].model_dump()}))
+            elif node_name == "revision_node":
+                events.append(("report_revising", {"revision": output["writer_revision"]}))
+            elif node_name == "render_node":
+                result = output["report_result"].model_dump(mode="json")
+                events.append(("write", result))
+                events.append(("report_completed", {"citations": result["citations"],
+                                                   "remaining_gaps": result["remaining_gaps"]}))
+        return events
+
+    @staticmethod
+    def to_public_event(event):
+        events = ResearchRuntime.to_public_events(event)
+        return events[0] if events else None
 
     def close(self) -> None:
         if self.paper_reader:

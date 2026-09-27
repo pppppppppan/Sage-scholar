@@ -1,3 +1,1 @@
-from .runtime import ResearchRuntime, ResearchRuntimeProvider
-
-__all__ = ["ResearchRuntime", "ResearchRuntimeProvider"]
+"""Research workflow adapters and typed evidence boundaries."""
