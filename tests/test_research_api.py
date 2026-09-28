@@ -18,7 +18,8 @@ from test_query_service import FakeModel
 
 
 @pytest.mark.parametrize("unsupported", [False, True])
-def test_research_api_citations_progress_and_partial(monkeypatch, tmp_path, library, unsupported):
+@pytest.mark.parametrize("tool_limit", [1, 60])
+def test_research_api_citations_progress_and_partial(monkeypatch, tmp_path, library, unsupported, tool_limit):
     _, adapter, a, _, _, pipeline = library
     config_dir = tmp_path / "config"
     config_dir.mkdir()
@@ -79,7 +80,8 @@ def test_research_api_citations_progress_and_partial(monkeypatch, tmp_path, libr
     before_chunks = len(pipeline.vector_store.chunks)
     with TestClient(create_app(container)) as client:
         response = client.post("/api/queries", json={"query": "调研指定论文的方法", "workflow": "deep_research",
-            "source_scope": "selected_documents", "document_ids": [a.document_id], "allow_web": False})
+            "source_scope": "selected_documents", "document_ids": [a.document_id], "allow_web": False,
+            "budget": {"max_tool_calls": tool_limit}})
         assert response.status_code == 202, response.text
         run_id = response.json()["run_id"]
         sse = client.get(f"/api/runs/{run_id}/events").text
@@ -91,6 +93,8 @@ def test_research_api_citations_progress_and_partial(monkeypatch, tmp_path, libr
         result = snapshot["result"]
         assert result["citations"] and "Method A [1]" in result["report"]
         assert "A scores 100%" not in result["report"]
+        assert not any("工具调用预算" in gap for gap in snapshot["remaining_gaps"])
+        assert '"blocked_by_budget": false' in sse
         assert bool(snapshot["remaining_gaps"]) == unsupported
         assert bool(result["removed_claim_ids"]) == unsupported
         for identity in result["citations"].values():

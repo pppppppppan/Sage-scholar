@@ -1,16 +1,16 @@
-import json
+import asyncio
 import logging
 import os
-import asyncio
-import time
 import threading
+import time
 from concurrent.futures import Future
-
 from typing import Any
-from mcp.types import CallToolResult, Tool
-from pydantic import BaseModel
-from mcp.client.stdio import stdio_client, StdioServerParameters
+
 from mcp import ClientSession
+from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.types import CallToolResult, Tool
+from pydantic import BaseModel, Field
+
 from ..tools import ToolCallError
 
 logger = logging.getLogger(__name__)
@@ -21,151 +21,140 @@ class MCPServerConfig(BaseModel):
     command: str
     args: list[str]
     env: dict[str, str] | None = None
+    connect_timeout: float = Field(default=12, gt=0)
+    call_timeout: float = Field(default=120, gt=0)
+    cleanup_timeout: float = Field(default=6, gt=0)
 
     def to_stdio_params(self) -> StdioServerParameters:
-        env = {**os.environ, **self.env} if self.env else os.environ
-        config = StdioServerParameters(
-            command=self.command, 
-            args=self.args, 
-            env=env,
-        )
-        return config
+        return StdioServerParameters(command=self.command, args=self.args,
+                                     env={**os.environ, **(self.env or {})})
 
 
 class MCPClient:
+    """One owning task for the stdio/session contexts, with bounded startup and shutdown."""
     def __init__(self, config: MCPServerConfig) -> None:
         self.name = config.name
-        self.server_config: StdioServerParameters = config.to_stdio_params()
-        self._thread = None
-        self._queue = None
-        self._ready_event = None
-        self._loop = None
+        self.config = config
+        self.server_config = config.to_stdio_params()
+        self._thread = self._loop = self._queue = self._main_task = None
+        self._ready_event = threading.Event()
+        self._stop_requested = threading.Event()
         self._connect_error = None
+        self._pending: set[Future] = set()
+        self._pending_lock = threading.Lock()
         self.tools = []
+        self.status = "not_started"
 
     def connect(self) -> list[Tool]:
-        self._queue = asyncio.Queue()
-
-        self._ready_event = threading.Event()
-        self._thread = threading.Thread(target=self._run_background, daemon=True)
+        if self.status == "available":
+            return self.tools
+        if self._thread is not None:
+            raise RuntimeError("MCP client cannot be reconnected; create a new client")
+        self.status = "initializing"
+        self._thread = threading.Thread(target=self._run_background, name=f"mcp-{self.name}", daemon=True)
         self._thread.start()
-
-        self._ready_event.wait()
-
-        if self._connect_error:
-            logger.error("[MCP] 连接失败: %s - %s", self.name, self._connect_error)
-            raise self._connect_error
-
-        logger.info("[MCP] 连接: %s (%d 个工具)", self.name, len(self.tools))
+        # Async timeout covers spawn + initialize + list_tools. The extra allowance
+        # lets the SDK close stdin and terminate the process group before returning.
+        if not self._ready_event.wait(self.config.connect_timeout + self.config.cleanup_timeout):
+            self._connect_error = TimeoutError(f"MCP {self.name} initialization timed out")
+        if self._connect_error is not None or self.status != "available":
+            self.status = "unavailable"
+            self.disconnect()
+            raise self._connect_error or RuntimeError(f"MCP {self.name} unavailable")
         return self.tools
 
     def _run_background(self):
-        asyncio.run(self._async_main())
+        try:
+            asyncio.run(self._async_main())
+        finally:
+            self._ready_event.set()
 
     async def _async_main(self):
         self._loop = asyncio.get_running_loop()
-
+        self._main_task = asyncio.current_task()
+        self._queue = asyncio.Queue()
         try:
-            async with stdio_client(self.server_config) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    self.tools = (await session.list_tools()).tools
-                    # (
-                    #     self._session.list_tools(),
-                    #     await self._session.list_resources(),
-                    #     await self._session.list_prompts(),
-                    # )
-                    self._connect_error = None
-                    self._ready_event.set()
-
-                    while True:
-                        command = await self._queue.get()
-                        if command is None:
-                            break
-
-                        future: Future
-                        name, args, future = command
-                        try:
-                            result = await session.call_tool(name=name, arguments=args)
-                            future.set_result(result)
-                        except Exception as e:
-                            future.set_exception(e)
-        except Exception as e:
-            self._connect_error = e
+            if self._stop_requested.is_set():
+                return
+            # Keep these nested contexts in the same task. Cancelling only a
+            # detached initialize task would leave the stdio subprocess alive.
+            async with asyncio.timeout(self.config.connect_timeout) as deadline:
+                async with stdio_client(self.server_config) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        self.tools = (await session.list_tools()).tools
+                        deadline.reschedule(None)
+                        self.status = "available"
+                        self._ready_event.set()
+                        while True:
+                            name, args, future = await self._queue.get()
+                            try:
+                                result = await asyncio.wait_for(
+                                    session.call_tool(name=name, arguments=args), self.config.call_timeout,
+                                )
+                                if not future.done():
+                                    future.set_result(result)
+                            except Exception as exc:
+                                if not future.done():
+                                    future.set_exception(exc)
+        except asyncio.CancelledError:
+            self._connect_error = RuntimeError(f"MCP {self.name} stopped")
+        except Exception as exc:
+            self._connect_error = exc
+        finally:
+            self.status = "unavailable" if self._connect_error else "closed"
+            with self._pending_lock:
+                for future in self._pending:
+                    if not future.done():
+                        future.set_exception(ToolCallError(f"MCP {self.name} connection closed", self.name))
             self._ready_event.set()
 
     def call_tool(self, name: str, args: dict[str, Any], _max_retries: int = 3):
-        if self._loop is None:
-            raise RuntimeError("MCPClient 未连接")
-
+        if self.status != "available" or self._loop is None:
+            raise ToolCallError(f"MCP {self.name} unavailable", name)
         for attempt in range(_max_retries + 1):
             future = Future()
-            self._loop.call_soon_threadsafe(self._queue.put_nowait, (name, args, future))
+            with self._pending_lock:
+                self._pending.add(future)
             try:
-                result: CallToolResult = future.result()
-            except Exception as e:
-                if "already borrowed" in str(e).lower() and attempt < _max_retries:
-                    logger.warning("[MCP] %s: already borrowed, 重试 %d/%d", name, attempt + 1, _max_retries)
+                self._loop.call_soon_threadsafe(self._queue.put_nowait, (name, args, future))
+                result: CallToolResult = future.result(timeout=self.config.call_timeout + self.config.cleanup_timeout)
+            except TimeoutError:
+                self.disconnect()
+                raise ToolCallError(f"MCP {self.name} tool call timed out", name) from None
+            except Exception as exc:
+                if "already borrowed" in str(exc).lower() and attempt < _max_retries:
                     time.sleep(0.5 * (attempt + 1))
                     continue
                 raise
-
+            finally:
+                with self._pending_lock:
+                    self._pending.discard(future)
             if result.isError:
-                error_text = result.content[0].text if result.content else "Unknown error"
+                error_text = "\n".join(item.text for item in result.content if hasattr(item, "text"))
                 if "already borrowed" in error_text.lower() and attempt < _max_retries:
-                    logger.warning("[MCP] %s: already borrowed, 重试 %d/%d", name, attempt + 1, _max_retries)
                     time.sleep(0.5 * (attempt + 1))
                     continue
-                raise ToolCallError(message=f"工具调用失败: {error_text}", tool_name=name)
-
-            return "\n".join(item.text for item in result.content)
-
-        raise ToolCallError(message="工具调用失败: already borrowed 重试次数用尽", tool_name=name)
+                raise ToolCallError(f"工具调用失败: {error_text}", name)
+            return "\n".join(item.text for item in result.content if hasattr(item, "text"))
+        raise ToolCallError("工具调用失败: already borrowed 重试次数用尽", name)
 
     def disconnect(self):
+        self._stop_requested.set()
         if self._thread is None:
             return
-        self._loop.call_soon_threadsafe(self._queue.put_nowait, None)
-        self._thread.join()
-        self._loop = None
-
-
-def create_mcp_clients(json_path: str) -> list[MCPClient]:
-    with open(json_path, "r", encoding="utf-8") as f:
-        configs: dict[str, dict] = json.load(f)
-
-    server_configs: list[MCPServerConfig] = []
-    for name, config in configs.items():
-        env: dict[str, str] = {}
-        missing = []
-        optional_env = set(config.get("optional_env", []))
-        for key, value in (config.get("env") or {}).items():
-            if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
-                variable = value[2:-1]
-                resolved = os.getenv(variable)
-                if not resolved or not resolved.strip():
-                    if key not in optional_env:
-                        missing.append(variable)
-                    continue
-                env[key] = resolved
-            else:
-                env[key] = value
-
-        if missing:
-            logger.warning("[MCP] 跳过未配置的服务 %s，缺少: %s", name, ", ".join(missing))
-            continue
-
-        server_config = MCPServerConfig(name=name, command=config["command"], args=config["args"], env=env)
-        server_configs.append(server_config)
-
-    clients = []
-    for config in server_configs:
-        client = MCPClient(config)
-        try:
-            client.connect()
-        except Exception as exc:
-            logger.warning("[MCP] 跳过连接失败的可选服务 %s: %s", config.name, exc)
+        def cancel_owner():
+            if self._main_task and not self._main_task.done() and not self._main_task.cancelling():
+                self._main_task.cancel()
+        if self._loop and not self._loop.is_closed():
+            try:
+                self._loop.call_soon_threadsafe(cancel_owner)
+            except RuntimeError:
+                pass  # The owning thread may have finished between the checks.
+        self._thread.join(timeout=self.config.cleanup_timeout)
+        if self._thread.is_alive():
+            logger.error("[MCP] %s cleanup exceeded deadline", self.name)
         else:
-            clients.append(client)
-
-    return clients
+            self._loop = None
+        if self.status == "available":
+            self.status = "closed"

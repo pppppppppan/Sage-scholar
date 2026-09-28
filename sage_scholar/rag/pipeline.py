@@ -87,6 +87,10 @@ class Pipeline:
             else VectorStore()
         )
 
+        if self.vector_store.chunks and self.vector_store.embedding_identity != self.embedding.identity:
+            raise RuntimeError("已有向量索引与当前 Embedding 配置不兼容。请重新建立索引，不能混用不同模型的向量。")
+        self.vector_store.embedding_identity = self.embedding.identity
+
     def add_document(self, file_path: str, save: bool = True):
         document = Document.read_file(file_path)
         chunks = self.chunker.chunk(document)

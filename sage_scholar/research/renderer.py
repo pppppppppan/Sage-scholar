@@ -1,12 +1,28 @@
+import html
+import re
+
 from sage_scholar.domain.research import ResearchReport
+from .report_labels import neutral_label
+
+
+def _gap_line(gap):
+    # Diagnostic prose must not open a new Markdown/HTML heading or summary block.
+    text = html.escape(" ".join(gap.split()), quote=False)
+    return "- " + re.sub(r"([\\`*_{}\[\]()#+.!|>-])", r"\\\1", text)
 
 
 class CitationRenderer:
     """Deterministic rendering from Claim objects; no URL dedup or citation guessing."""
-    def render(self, draft, verification, *, remaining_gaps=()):
+    def render(self, draft, verification, *, remaining_gaps=(), rejected_claim_texts=()):
         judgments = {item.claim_id: item for item in verification.claims}
         claims = {claim.claim_id: claim for claim in draft.claims}
-        labels, lines, removed, kept = {}, [f"# {draft.title}"], [], []
+        rejected = [*rejected_claim_texts, *[
+            claim.text for claim in draft.claims
+            if (claim.claim_id not in judgments or judgments[claim.claim_id].status != "supported"
+                or not judgments[claim.claim_id].identity_valid)
+        ]]
+        title = neutral_label(draft.title, fallback="研究报告", rejected_claim_texts=rejected)
+        labels, lines, removed, kept = {}, [f"# {title}"], [], []
         seen_claims = set()
         # Unplaced claims are not silently dropped from verification or disclosure.
         sections = [(section.heading, section.claim_ids) for section in draft.sections]
@@ -29,6 +45,7 @@ class CitationRenderer:
                 citations = "".join(f"[{labels[item]}]" for item in dict.fromkeys(claim.evidence_ids))
                 body.append(f"{claim.text} {citations}")
             if body:
+                heading = neutral_label(heading, fallback="研究发现", rejected_claim_texts=rejected)
                 lines.append("## " + heading + "\n\n" + "\n\n".join(body))
         gaps = list(dict.fromkeys([*remaining_gaps, *verification.issues]))
         for identity in removed:
@@ -37,7 +54,7 @@ class CitationRenderer:
         if not kept:
             gaps.append("没有获得经核验支持的报告主张")
         if gaps:
-            lines.append("## 未解决事项\n\n" + "\n".join(f"- {gap}" for gap in gaps))
+            lines.append("## 未解决事项\n\n" + "\n".join(_gap_line(gap) for gap in gaps))
         if labels:
             lines.append("## 证据索引\n\n" + "\n".join(
                 f"[{number}] {identity} — /api/evidence/{identity}" for identity, number in labels.items()

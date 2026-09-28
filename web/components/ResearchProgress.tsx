@@ -59,6 +59,9 @@ export default function ResearchProgress({
   onReport: (report: string, stats: ResearchStats | null) => void;
 }) {
   const [nodes, setNodes] = useState<TimelineNode[]>([]);
+  const [initialization, setInitialization] = useState<{
+    message: string; ready: boolean; tools: Record<string, { available: boolean; message: string }>;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedSet, setExpandedSet] = useState<Set<number>>(new Set());
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set());
@@ -76,6 +79,19 @@ export default function ResearchProgress({
   useEffect(() => {
     const abort = startRunEvents(runId, (event: ResearchEvent) => {
       switch (event.type) {
+        case "initializing_tools":
+          setInitialization({ message: event.message, ready: false, tools: {} });
+          break;
+        case "tool_available":
+        case "tool_unavailable":
+          setInitialization((prev) => ({
+            message: prev?.message || "正在初始化研究工具…", ready: false,
+            tools: { ...prev?.tools, [event.server]: { available: event.type === "tool_available", message: event.message } },
+          }));
+          break;
+        case "research_started":
+          setInitialization((prev) => ({ message: event.message, ready: true, tools: prev?.tools || {} }));
+          break;
         case "plan": {
           const subs = event.sub_questions;
           setNodes((prev) => [...prev, { kind: "plan", sub_questions: subs }]);
@@ -357,11 +373,25 @@ export default function ResearchProgress({
         <div className="absolute left-[13px] top-0 bottom-2 w-0.5 bg-foreground/8" />
 
         {/* Initial loading */}
-        {nodes.length === 0 && !error && (
+        {initialization && (
+          <div className="relative pb-4 bubble-enter" aria-live="polite">
+            <TimelineDot active={!initialization.ready} />
+            <NodeBubble>
+              <p className="text-[14px] font-medium">{nodes.length ? "研究工具初始化完成" : initialization.message}</p>
+              {Object.entries(initialization.tools).map(([server, tool]) => (
+                <p key={server} className={`mt-1 text-[13px] ${tool.available ? "text-muted-foreground" : "text-retry"}`}>
+                  {tool.message}
+                </p>
+              ))}
+            </NodeBubble>
+          </div>
+        )}
+
+        {nodes.length === 0 && !error && !initialization && (
           <div className="relative pb-4 bubble-enter">
             <TimelineDot active />
             <NodeBubble>
-              <StreamingText text="正在规划研究方案" mode="dots" />
+              <StreamingText text="正在初始化研究工具" mode="dots" />
             </NodeBubble>
           </div>
         )}

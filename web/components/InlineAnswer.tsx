@@ -1,14 +1,13 @@
 "use client";
 
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import MarkdownContent from "@/components/MarkdownContent";
 import type { EvidenceRef } from "@/lib/api";
 
 export default function InlineAnswer({ answer, evidence }: { answer: string; evidence: EvidenceRef[] }) {
   return (
     <div className="w-full max-w-3xl rounded-2xl border border-foreground/10 bg-surface p-6 shadow-sm">
       <article className="report-prose">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{answer}</ReactMarkdown>
+        <MarkdownContent>{answer}</MarkdownContent>
       </article>
       {evidence.length > 0 && (
         <div className="mt-6 border-t border-foreground/10 pt-4">

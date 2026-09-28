@@ -28,6 +28,8 @@ class State(TypedDict):
     draft: ReportDraft
     verification_result: VerificationResult
     verification_history: list[VerificationResult]
+    rejected_claim_texts: list[str]
+    blocked_by_budget: bool
     removed_during_revision: list[str]
     writer_revision: int
     draft_gaps: list[str]
@@ -46,6 +48,7 @@ class OutputSchema(TypedDict):
     report_result: ResearchReport
     research_notes: dict[str, ResearchNote | None]
     tasks: dict[str, ResearchTask]
+    blocked_by_budget: bool
 
 
 def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier, budget=None):
@@ -80,7 +83,8 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier
         completed = {key for key, task in tasks.items() if task.status == "completed"}
         ready = [key for key, task in tasks.items()
                  if task.status == "pending" and set(task.dependencies) <= completed]
-        if budget and budget.exhausted:
+        if ready and budget and budget.exhausted:
+            budget.mark_blocked()
             ready = []
         updates = {}
         if not ready:
@@ -122,9 +126,13 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier
         current_notes = notes(state)
         review = gap_reviewer.review(contract, list(state.get("tasks", {}).values()), current_notes)
         review.missing.extend(state.get("task_gaps", []))
-        if budget and budget.exhausted:
+        if budget and budget.exhausted and review.gaps and review.next_tasks:
+            budget.mark_blocked()
+        if budget and budget.blocked_by_budget:
             review.missing.append("工具调用预算已耗尽")
+            review.missing.append("预算已阻断必要工具调用或后续研究")
         return {
+            "blocked_by_budget": bool(budget and budget.blocked_by_budget),
             "gap_review": review, "refine_round": state.get("refine_round", 0) + 1,
             "evidence_ids": sorted({identity for note in current_notes for identity in note.evidence_ids}),
         }
@@ -171,7 +179,11 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier
                                   identity_valid=False, evidence_ids=claim.evidence_ids)
                 for claim in state["draft"].claims
             ], issues=[f"引用核验失败：{exc}"])
+        accepted = {item.claim_id for item in verification.claims
+                    if item.status == "supported" and item.identity_valid}
+        rejected = [claim.text for claim in state["draft"].claims if claim.claim_id not in accepted]
         return {"verification_result": verification,
+                "rejected_claim_texts": list(dict.fromkeys([*state.get("rejected_claim_texts", []), *rejected])),
                 "verification_history": [*state.get("verification_history", []), verification]}
 
     def verification_route(state):
@@ -191,7 +203,10 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier
             gaps.append("已达到报告修订上限，剩余未充分支持的主张不纳入正文")
         removed = state.get("removed_during_revision", [])
         gaps.extend(f"修订中移除未充分支持的主张 {identity}" for identity in removed)
-        report = CitationRenderer().render(state["draft"], state["verification_result"], remaining_gaps=gaps)
+        report = CitationRenderer().render(
+            state["draft"], state["verification_result"], remaining_gaps=gaps,
+            rejected_claim_texts=state.get("rejected_claim_texts", []),
+        )
         report.removed_claim_ids = list(dict.fromkeys([*removed, *report.removed_claim_ids]))
         report.verification_history = state.get("verification_history", [])
         return {"report_result": report, "final_report": report.report}

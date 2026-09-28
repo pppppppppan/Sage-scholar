@@ -11,6 +11,7 @@ from .document import Chunk
 
 class VectorStore:
     def __init__(self) -> None:
+        self.embedding_identity: dict | None = None
         self.chunks: list[Chunk] = []
         self._file_index: dict[str, list[Chunk]] = {}
 
@@ -32,6 +33,8 @@ class VectorStore:
             if allowed_file_paths is not None and chunk.file_path not in allowed_file_paths:
                 continue
             ebd = chunk.embedding
+            if ebd is None or len(ebd) != len(query_embedding):
+                raise RuntimeError("向量维度不一致，请使用同一向量模型重新建立索引。")
             dot = 0
             for qi, ei in zip(query_embedding, ebd):
                 dot += qi * ei
@@ -96,12 +99,14 @@ class VectorStore:
 
     def save_to_json(self, file_path: str):
         chunk_dicts = [chunk.model_dump() for chunk in self.chunks]
-        write_json(Path(file_path), chunk_dicts)
+        write_json(Path(file_path), {"embedding_identity": self.embedding_identity, "chunks": chunk_dicts})
 
     @classmethod
     def load_json(cls, file_path: str) -> VectorStore:
         with open(file_path, "r", encoding="utf-8") as f:
-            data: list[dict] = json.load(f)
+            data = json.load(f)
+        identity = data.get("embedding_identity") if isinstance(data, dict) else None
+        data = data["chunks"] if isinstance(data, dict) else data
 
         chunks: list[Chunk] = []
         for chunk_dict in data:
@@ -109,6 +114,7 @@ class VectorStore:
             chunks.append(chunk)
 
         vector_store = cls()
+        vector_store.embedding_identity = identity
         vector_store.add_chunks(chunks=chunks)
 
         return vector_store

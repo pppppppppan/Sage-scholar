@@ -29,6 +29,7 @@ class ContextConfig:
 class Config:
     config_dir: str = field(default_factory=lambda: os.getenv("SAGE_CONFIG_DIR", str(PROJECT_DIR / "configs")))
     data_dir: str = field(default_factory=lambda: os.getenv("SAGE_DATA_DIR", str(PROJECT_DIR / "data")))
+    mcp_connect_timeout: float = field(default_factory=lambda: float(os.getenv("MCP_CONNECT_TIMEOUT", "12")))
     max_rounds: int = 3
     max_steps: int = 3
     llm: LLMConfig = field(default_factory=LLMConfig)

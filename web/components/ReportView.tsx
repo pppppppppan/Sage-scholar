@@ -1,12 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeRaw from "rehype-raw";
-import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
+import MarkdownContent from "@/components/MarkdownContent";
 import { saveReport } from "@/lib/api";
 
 interface ReportViewProps {
@@ -25,25 +20,13 @@ interface ProcessedReport {
   sources: SourceItem[];
 }
 
-function sanitizeMathDollars(text: string): string {
-  // 单行 $$...$$ 拆成三行，remark-math 才识别为 display math
-  const out = text.replace(/^\$\$(.+)\$\$$/gm, "$$$$\n$1\n$$$$");
-  // 先保护真正的 LaTeX 对（$$...$$ 和 $...$），再转义剩余的独立 $数字（货币）
-  const saved: string[] = [];
-  const masked = out
-    .replace(/\$\$[\s\S]*?\$\$/g, (m) => { saved.push(m); return `\x00M${saved.length - 1}\x00`; })
-    .replace(/\$[^$\n]+\$/g, (m) => { saved.push(m); return `\x00M${saved.length - 1}\x00`; });
-  const escaped = masked.replace(/\$(?=\d)/g, "\\$");
-  return escaped.replace(/\x00M(\d+)\x00/g, (_, i) => saved[parseInt(i)]);
-}
-
 function processReport(raw: string): ProcessedReport {
   const headingMatch = raw.match(
     /^(#{1,3})\s*(Sources|References|参考文献)\s*$/m,
   );
   if (!headingMatch) {
     return {
-      body: sanitizeMathDollars(raw),
+      body: raw,
       sourcesHeading: "",
       sources: [],
     };
@@ -51,12 +34,12 @@ function processReport(raw: string): ProcessedReport {
 
   const heading = headingMatch[0];
   const splitIdx = headingMatch.index!;
-  const body = sanitizeMathDollars(raw.slice(0, splitIdx));
+  const body = raw.slice(0, splitIdx);
   const sourcesText = raw.slice(splitIdx + heading.length).trim();
 
   const processedBody = body.replace(
     /\[(\d+)\](?!\()/g,
-    '<a href="#source-$1" class="citation-link">[$1]</a>',
+    '[$1](#source-$1)',
   );
 
   const sources: SourceItem[] = [];
@@ -73,7 +56,7 @@ function processReport(raw: string): ProcessedReport {
 }
 
 function handleCitationClick(e: React.MouseEvent<HTMLElement>) {
-  const link = (e.target as HTMLElement).closest("a.citation-link");
+  const link = (e.target as HTMLElement).closest('a[href^="#source-"]');
   if (!link) return;
   e.preventDefault();
   const id = link.getAttribute("href")?.slice(1);
@@ -152,22 +135,21 @@ export default function ReportView({ report, stats }: ReportViewProps) {
         </button>
       </div>
       <article className="report-prose" onClick={handleCitationClick}>
-        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeRaw, rehypeKatex]}>
+        <MarkdownContent>
           {body}
-        </ReactMarkdown>
+        </MarkdownContent>
         {sources.length > 0 && (
           <>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <MarkdownContent>
               {sourcesHeading}
-            </ReactMarkdown>
+            </MarkdownContent>
             {sources.map((s) => (
               <div key={s.id} id={`source-${s.id}`} className="source-item">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
+                <MarkdownContent
                   components={sourceComponents}
                 >
                   {s.text}
-                </ReactMarkdown>
+                </MarkdownContent>
               </div>
             ))}
           </>

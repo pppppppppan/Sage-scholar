@@ -17,6 +17,12 @@ flowchart LR
     SSE --> UI
 ```
 
+## V3.1 correctness patch（2026-09-27）
+
+- 区分预算“刚好用满”与“实际阻断工作”：只有后者产生预算缺口，完成任务不会因 used == limit 被误判 PARTIAL。
+- 最终标题/小节仅保留中性导航标签；事实断言、引用 marker、与历轮被否决 Claim 重合的文字自动降级，正文引用逻辑不变。
+- 128 项后端测试、compileall、前端 lint/build 通过。不新增工作流或依赖。改动与测试说明见 [V3.1 修补记录](docs/v3.1-correctness-patch.md)。
+
 ## V3：Deep Research Evidence 化（2026-09-26）
 
 - 研究员保留 ReAct 工具循环，输出结构化 ResearchNote、真实 evidence_ids、unknowns 和 conflicts。
@@ -106,7 +112,7 @@ cp .env.example .env
 `.env` 按实际使用的能力填写：
 
 - 普通 Direct 和 Deep Research 需要所选 LLM provider 的 key。
-- 文档 QA/入库的向量能力需要 Embedding 配置。
+- 文档 QA/入库默认使用本地 Embedding，无需向量 API Key；首次使用需下载模型。
 - Brave、Tavily、GitHub 和其他 MCP 服务都是可选项；未配置的服务会被跳过。
 - `/api/health`、日期/星期 Direct 和 Router 测试不需要任何 key。
 
@@ -142,6 +148,7 @@ curl -X POST http://localhost:8000/api/queries \
 cd /Users/pan/Desktop/1/sage-scholar
 python -m pytest -q
 python -m compileall -q sage_scholar tests
+npm --prefix web test
 npm --prefix web run lint
 npm --prefix web run build
 ```
@@ -155,3 +162,21 @@ npm --prefix web run build
 - 本阶段没有引入 Redis、Celery、Kafka、独立 Worker、认证或多用户并发体系。
 
 工程审计见 [`docs/repository-audit.md`](docs/repository-audit.md)，逐文件迁移来源见 [`docs/migration-map.md`](docs/migration-map.md)。
+
+## V3.2 可用性修补
+
+- Direct、QA 与 Research Report 共享 MarkdownContent（GFM / remark-math / KaTeX）和公式规范化逻辑，保留金额、环境变量与代码中的普通美元符号。
+- MCP 在首次需要时按能力加载：公网研究只选 Brave/Tavily、fetch、paper-search；PDF 入库只选 pdfmux；arXiv 入库只选 paper-search。Direct、本地 QA 和禁止联网的研究不连接 Web MCP，GitHub 不随研究启动。
+- `.env` 的 `MCP_CONNECT_TIMEOUT=12` 设置每个服务的启动、握手及工具列表总期限（秒）。可选服务并行连接，失败后清理会有额外的有限等待，其他服务继续可用。缺少必需 key 时直接跳过。
+- SSE 提供工具初始化、可用/不可用和研究开始事件；前端显示简短提示，不展示 MCP 异常堆栈。研究能否完成仍由证据覆盖情况决定，工具故障本身不强制 PARTIAL；无可用来源或覆盖不足则返回 PARTIAL。
+- 工具状态缓存在当前进程；修改 key 或修复服务后需重启后端重新连接。此次没有改动 ResearchNote / Evidence / Gap Review / Writer / Verifier 主链。
+
+本轮逐文件修改与验证范围见 [V3.2 修补记录](docs/v3.2-usability-patch.md)。
+
+## 本地 Embedding
+
+`.env` 设置 `EMBEDDING_PROVIDER=local`、`EMBEDDING_LOCAL_MODEL=intfloat/multilingual-e5-small`，不调用 GLM Embedding，也不需要 API Key。复用已有 sentence-transformers/torch 依赖。默认 CPU 和 batch size 16；可通过 EMBEDDING_DEVICE / EMBEDDING_BATCH_SIZE 调整。首次使用会下载模型，已缓存后可设置 EMBEDDING_LOCAL_ONLY=true；也可将模型名替换为本地模型目录。
+
+默认模型支持中英文，使用 query:/passage: 前缀及归一化向量，单段最多 512 tokens。若替换非 E5 模型，需同步按模型说明设置 EMBEDDING_QUERY_PREFIX / EMBEDDING_DOCUMENT_PREFIX。模型或前缀改变后必须重建向量索引；索引保存配置身份，拒绝混用不同模型。来源 PDF 和 Evidence 不因向量配置改变而删除。LLM 对话/研究调用仍使用原来的 provider。
+
+模型说明：https://huggingface.co/intfloat/multilingual-e5-small

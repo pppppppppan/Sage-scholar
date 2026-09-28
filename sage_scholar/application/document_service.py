@@ -33,10 +33,8 @@ class DocumentService:
                 overwrite,
                 document_id=document_id, source_identifier=source_identifier,
             )
-        runtime = await asyncio.to_thread(self._runtime_provider.get)
-        manager = await asyncio.to_thread(runtime.create_library_manager)
-        if suffix == ".pdf" and runtime.pdfmux_tool is None:
-            raise RuntimeError("PDF 解析工具未配置；请启用 pdfmux MCP 服务。")
+        capability = "pdf" if suffix == ".pdf" else "paper"
+        manager = await asyncio.to_thread(self._runtime_provider.get_library_manager, capability)
         return await asyncio.to_thread(
             manager.ingest,
             source,

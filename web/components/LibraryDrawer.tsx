@@ -3,7 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { listDocs, deleteDoc, uploadFile, type LibraryDoc } from "@/lib/api";
 
-export default function LibraryDrawer() {
+export default function LibraryDrawer({ selectedDocuments, onSelectionChange }: {
+  selectedDocuments: LibraryDoc[];
+  onSelectionChange: (documents: LibraryDoc[]) => void;
+}) {
   const [docs, setDocs] = useState<LibraryDoc[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -12,12 +15,14 @@ export default function LibraryDrawer() {
   const [removing, setRemoving] = useState<string | null>(null);
   const [entering, setEntering] = useState<Set<string>>(new Set());
   const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     listDocs()
       .then(setDocs)
+      .catch((err) => setError(err instanceof Error ? err.message : "文献库加载失败"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -39,15 +44,19 @@ export default function LibraryDrawer() {
   }
 
   async function performDelete(documentId: string) {
+    setError(null);
     setDeleting(documentId);
     try {
       await deleteDoc(documentId);
+      onSelectionChange(selectedDocuments.filter((doc) => doc.document_id !== documentId));
       setConfirming(null);
       setRemoving(documentId);
       setTimeout(() => {
         setDocs((prev) => prev.filter((d) => d.document_id !== documentId));
         setRemoving(null);
       }, 300);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "删除失败，请重试");
     } finally {
       setDeleting(null);
     }
@@ -56,6 +65,7 @@ export default function LibraryDrawer() {
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+    setError(null);
     setUploading(true);
     try {
       for (const file of Array.from(files)) {
@@ -81,6 +91,8 @@ export default function LibraryDrawer() {
           });
         });
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "上传失败，请重试");
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -136,6 +148,8 @@ export default function LibraryDrawer() {
           </button>
         </div>
 
+        {error && <p role="alert" className="mx-5 mb-3 text-[13px] text-retry break-words">{error}</p>}
+
         {/* Doc list */}
         <div ref={listRef} className="flex-1 overflow-y-auto px-3 thin-scroll">
           {loading && (
@@ -164,9 +178,18 @@ export default function LibraryDrawer() {
                   className="group relative px-2.5 py-2.5 rounded-lg hover:bg-background/60 transition-colors"
                   data-confirm-row={isConfirming ? "" : undefined}
                 >
-                  <p className="text-[14px] text-foreground/85 leading-snug break-words pr-6">{doc.title}</p>
+                  <label className="flex items-start gap-2 pr-6 text-[14px] text-foreground/85 leading-snug break-words">
+                    <input type="checkbox" className="mt-1 shrink-0" aria-label={`选择 ${doc.title}`}
+                      disabled={!doc.active_version && doc.ingestion_status !== "ready"}
+                      checked={selectedDocuments.some((item) => item.document_id === doc.document_id)}
+                      onChange={(event) => onSelectionChange(event.target.checked
+                        ? [...selectedDocuments, doc]
+                        : selectedDocuments.filter((item) => item.document_id !== doc.document_id))} />
+                    <span>{doc.title}</span>
+                  </label>
                   <p className="text-[11px] text-muted-foreground mt-0.5">
                     {formatSourceType(doc.source_type)}
+                    {doc.ingestion_status !== "ready" && ` · ${{ uploaded: "待处理", parsing: "解析中", indexing: "建立索引中", failed: "处理失败" }[doc.ingestion_status]}`}
                     {" · "}
                     {new Date(doc.added_at).toLocaleDateString("zh-CN")}
                   </p>

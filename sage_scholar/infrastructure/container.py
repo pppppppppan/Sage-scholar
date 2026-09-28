@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sage_scholar.application.direct_service import DirectService
+from sage_scholar.application.document_resolver import DocumentResolver
 from sage_scholar.application.document_service import DocumentService
 from sage_scholar.application.qa_service import QAService
 from sage_scholar.application.query_service import QueryService
@@ -36,6 +37,7 @@ class ApplicationContainer:
         )
         self.query_service = QueryService(
             router=QueryRouter(),
+            document_resolver=DocumentResolver(self.retrieval.documents),
             direct=DirectService(self.model_gateway),
             qa=QAService(self.retrieval, self.model_gateway),
             run_manager=self.run_manager,

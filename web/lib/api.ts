@@ -53,8 +53,15 @@ export interface ChatMessage {
 
 async function expectJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `请求失败 (${response.status})`);
+    const body = await response.text();
+    let message = `请求失败 (${response.status})`;
+    try {
+      const data = JSON.parse(body);
+      if (typeof data.detail === "string") message = data.detail;
+    } catch {
+      // Proxy error pages are not suitable for displaying in the document drawer.
+    }
+    throw new Error(message);
   }
   return response.json() as Promise<T>;
 }
@@ -62,6 +69,7 @@ async function expectJson<T>(response: Response): Promise<T> {
 export async function submitQuery(
   query: string,
   history: ChatMessage[] = [],
+  documentIds: string[] = [],
 ): Promise<QueryResponse> {
   const response = await fetch(`${API_BASE}/api/queries`, {
     method: "POST",
@@ -70,6 +78,7 @@ export async function submitQuery(
       query,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       history,
+      document_ids: documentIds,
     }),
   });
   return expectJson<QueryResponse>(response);
@@ -84,6 +93,7 @@ export interface SaveReportResult {
 }
 
 export interface LibraryDoc {
+  active_version?: string | null;
   document_id: string;
   document_version: string;
   ingestion_status: "uploaded" | "parsing" | "indexing" | "ready" | "failed";
@@ -124,6 +134,8 @@ export async function uploadFile(file: File): Promise<SaveReportResult> {
 }
 
 export type ResearchEvent =
+  | { type: "initializing_tools" | "research_started"; message: string }
+  | { type: "tool_available" | "tool_unavailable"; server: string; message: string; reason?: string | null }
   | { type: "plan"; sub_questions: { label: string; question: string }[] }
   | { type: "research"; question: string; preview: string; tool_call_counts: Record<string, number>; status?: "completed" | "failed" }
   | { type: "review"; round: number; review_summary: { question: string; verdict: string; failed: Record<string, boolean>; evidence?: Record<string, string> }[]; missing_dimensions?: string }
@@ -173,7 +185,8 @@ export function startRunEvents(
             if (
               eventType &&
               data &&
-              ["plan", "research", "review", "write", "stats", "run_finished", "run_cancelled", "run_interrupted", "error",
+              ["initializing_tools", "tool_available", "tool_unavailable", "research_started",
+               "plan", "research", "review", "write", "stats", "run_finished", "run_cancelled", "run_interrupted", "error",
                "research_planned", "research_task_started", "research_task_completed", "gap_reviewed",
                "report_drafting", "citation_verifying", "report_revising", "report_completed"].includes(eventType)
             ) {

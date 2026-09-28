@@ -10,6 +10,7 @@ from sage_scholar.routing import QueryRouter, RouteDecision, SourceScope, Workfl
 from sage_scholar.runtime import RunManager
 
 from .direct_service import DirectService
+from .document_resolver import DocumentResolver
 from .ports import LongTaskRunner
 from .qa_service import QAService
 
@@ -58,7 +59,9 @@ class QueryService:
         qa: QAService,
         run_manager: RunManager,
         long_runners: dict[Workflow, LongTaskRunner],
+        document_resolver: DocumentResolver | None = None,
     ):
+        self._document_resolver = document_resolver
         self._router = router
         self._direct = direct
         self._qa = qa
@@ -67,13 +70,21 @@ class QueryService:
 
     async def execute(self, command: QueryCommand) -> QueryResult:
         request_id = uuid.uuid4().hex
+        document_ids = command.document_ids
+        resolution_message = None
+        # Explicit remote/conversation scope and Direct/Search choices retain their semantics.
+        if self._document_resolver and command.workflow not in {Workflow.DIRECT, Workflow.SEARCH} and command.source_scope in {None, SourceScope.SELECTED_DOCUMENTS}:
+            resolution = await self._document_resolver.resolve(command.query, document_ids)
+            document_ids, resolution_message = resolution.document_ids, resolution.message
         route = self._router.route(
             command.query,
             requested_workflow=command.workflow,
             requested_scope=command.source_scope,
-            document_ids=command.document_ids,
+            document_ids=document_ids,
             allow_web=command.allow_web,
         )
+        if resolution_message:
+            route = route.model_copy(update={"needs_clarification": True, "clarification_message": resolution_message})
         if route.needs_clarification:
             return QueryResult(
                 request_id=request_id,

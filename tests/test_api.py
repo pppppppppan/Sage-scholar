@@ -79,6 +79,7 @@ def test_existing_api_paths_and_methods_remain():
 
 def test_library_upload_qa_evidence_and_sse_compatibility(tmp_path):
     from sage_scholar.application.direct_service import DirectService
+    from sage_scholar.application.document_resolver import DocumentResolver
     from sage_scholar.application.document_service import DocumentService
     from sage_scholar.application.qa_service import QAService
     from sage_scholar.application.query_service import QueryService
@@ -109,16 +110,25 @@ def test_library_upload_qa_evidence_and_sse_compatibility(tmp_path):
     container.evidence_store = retrieval.evidence_store
     container.document_service = DocumentService(None, config.data_dir, lambda: pipeline)
     container.query_service = QueryService(QueryRouter(), DirectService(model), QAService(retrieval, model),
-                                            manager, {Workflow.DEEP_RESEARCH: PartialRunner()})
+                                            manager, {Workflow.DEEP_RESEARCH: PartialRunner()},
+                                            document_resolver=DocumentResolver(retrieval.documents))
     with TestClient(create_app(container)) as client:
         assert client.get("/api/health").status_code == 200
         response = client.post("/api/library/upload", files={
-            "file": ("paper.md", b"# Method\nDataset Alpha", "text/markdown"),
+            "file": ("34552.md", b"# Method\nDataset Alpha", "text/markdown"),
         })
         assert response.status_code == 200, response.text
         document = response.json()
         assert document["ingestion_status"] == "ready"
         assert client.get("/api/library").json()[0]["document_id"] == document["document_id"]
+        # User can name a successfully uploaded paper without manually supplying its UUID.
+        automatic = client.post("/api/queries", json={"query": "34552这篇论文使用了哪些数据集？训练集和测试集是怎么划分的？"})
+        assert automatic.status_code == 200
+        auto = automatic.json()
+        assert auto["status"] == "inline" and auto["route"]["workflow"] == "qa"
+        assert auto["route"]["document_ids"] == [document["document_id"]]
+        assert auto["route"]["allow_web"] is False
+        assert auto["evidence"][0]["document_id"] == document["document_id"]
         response = client.post("/api/queries", json={
             "query": "论文用了什么数据集", "workflow": "qa",
             "source_scope": "selected_documents", "document_ids": [document["document_id"]],

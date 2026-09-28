@@ -11,6 +11,7 @@ import {
   submitQuery,
   type ChatMessage,
   type EvidenceRef,
+  type LibraryDoc,
 } from "@/lib/api";
 
 type Stage = "input" | "chat" | "researching" | "report";
@@ -25,6 +26,7 @@ interface ChatTurn {
 }
 
 export default function Home() {
+  const [selectedDocuments, setSelectedDocuments] = useState<LibraryDoc[]>([]);
   const [stage, setStage] = useState<Stage>("input");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [sending, setSending] = useState(false);
@@ -75,7 +77,7 @@ export default function Home() {
     setSending(true);
 
     try {
-      const response = await submitQuery(value, history);
+      const response = await submitQuery(value, history, selectedDocuments.map((doc) => doc.document_id));
       if (response.status === "accepted" && response.run_id) {
         setTurns((previous) =>
           previous.map((turn) =>
@@ -136,6 +138,7 @@ export default function Home() {
     setTimeout(() => {
       setStage("input");
       setTurns([]);
+      setSelectedDocuments([]);
       setSending(false);
       setActiveQuery("");
       setActiveTurnId(null);
@@ -150,9 +153,15 @@ export default function Home() {
 
   return (
     <>
+      <LibraryDrawer selectedDocuments={selectedDocuments} onSelectionChange={setSelectedDocuments} />
+      {selectedDocuments.length > 0 && (
+        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-2 text-sm text-muted-foreground">
+          <span>本次资料：{selectedDocuments.map((doc) => doc.title).join("、")}</span>
+          <button onClick={() => setSelectedDocuments([])} className="shrink-0 underline">清除选择</button>
+        </div>
+      )}
       {stage === "input" && (
         <>
-          <LibraryDrawer />
           <div className="flex flex-1 flex-col items-center px-4">
             <HeroSection onSubmit={handleQuerySubmit} />
           </div>

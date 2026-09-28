@@ -1,11 +1,14 @@
+from __future__ import annotations
+
 import logging
 import os
 import shutil
 import tempfile
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from .base_tool import BaseTool, ToolParameter, ToolCallError
-from ..mcp.tool_adapter import MCPTool
+if TYPE_CHECKING:
+    from ..mcp.tool_adapter import MCPTool
 
 logger = logging.getLogger(__name__)
 
