@@ -25,12 +25,15 @@ class CitationIdentity(BaseModel):
     status: Literal["source_found", "source_not_found"]
     evidence_ids: list[str] = Field(default_factory=list)
     reason: str = ""
+    resolved_source: str | None = None
+    metadata: dict = Field(default_factory=dict)
 
 
 class AuditItem(BaseModel):
     claim: Claim
     sources: list[CitationIdentity]
-    source_identity_status: Literal["source_found", "source_not_found"]
+    citation_status: Literal["present", "missing"] = "present"
+    source_identity_status: Literal["source_found", "source_not_found", "not_applicable"]
     support_status: Literal["supported", "partially_supported", "unsupported", "uncertain"]
     evidence_ids: list[str]
     locations: list[dict]

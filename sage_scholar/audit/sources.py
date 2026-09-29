@@ -1,7 +1,7 @@
-"""Resolve explicit identities, never turn search snippets or memories into Evidence."""
-import re
-
+"""Resolve citation identities first, then obtain authorized original-text Evidence."""
 from sage_scholar.research.evidence_context import ResearchEvidenceContext
+from sage_scholar.runtime.journal import WorkflowInterrupted
+from .bibliography import parse_reference, match_reference
 from .models import CitationIdentity
 
 
@@ -10,40 +10,68 @@ class AuditSources:
         self.retrieval, self.policy, self.fetch = retrieval, policy, fetch
         self.context = ResearchEvidenceContext(retrieval.evidence_store, policy, retrieval.documents)
         self._sections = None
+        self._resolved = {}
+
+    def _local(self, source):
+        if not self.policy.permits_local:
+            return []
+        docs = self.retrieval.permitted_documents(self.policy)
+        ids = {d.document_id for d in docs if source in {
+            d.document_id, d.title, d.source_identifier, d.metadata.get("arxiv_id")} or
+            source in {parse_reference(value).locator for value in
+                       (d.source_identifier, d.metadata.get("arxiv_id")) if isinstance(value, str)}}
+        if len(ids) > 1:
+            raise ValueError("本地存在多个同名来源，请指定 document_id")
+        if not ids:
+            return []
+        if self._sections is None:
+            self._sections = self.retrieval.read_documents_sync(self.policy)
+        return [e for e in self._sections if e.document_id in ids]
 
     def resolve(self, citation, source):
-        items = []
-        # Reference entries may contain authors/title around an explicit URL or DOI.
-        original_source = source
-        url = re.search(r"https?://[^\s<>\]]+", source)
-        doi = re.search(r"\b10\.\d{4,9}/[^\s]+", source)
-        if url:
-            source = url.group().rstrip(".,;)")
-        elif doi:
-            source = "https://doi.org/" + doi.group().rstrip(".,;)")
-        reason = "在当前资料范围内未定位到原文；未查到不等于伪造。"
+        if source in self._resolved:
+            return self._resolved[source].model_copy(update={"citation": citation}, deep=True)
+        original = source
+        reference = parse_reference(source)
+        source = reference.locator or source
+        metadata, items, matched = {}, [], False
+        reason = "在当前资料范围内未定位到来源；当前无法确认，不等于伪造。"
         try:
             if source.startswith("ev_"):
                 item = self.retrieval.evidence_store.get(source)
                 items = [item] if item else []
             else:
-                if self.policy.permits_local:
-                    if self._sections is None:
-                        self._sections = self.retrieval.read_documents_sync(self.policy)
-                    docs = self.retrieval.permitted_documents(self.policy)
-                    ids = {d.document_id for d in docs if source in {
-                        d.document_id, d.title, d.source_identifier, d.metadata.get("arxiv_id")}}
-                    items = [e for e in self._sections if e.document_id in ids or e.source_id == source]
+                items = self._local(source)
                 if not items and self.policy.permits_web:
-                    items = self.retrieval.evidence_store.find_source(source)
-                    if not items and self.fetch and source.startswith(("https://", "http://", "arxiv:")):
-                        items = self.fetch(source)
+                    if (not reference.locator and not source.startswith("doc_")
+                            and any(c.isalpha() for c in reference.title)
+                            and self.fetch and hasattr(self.fetch, "search")):
+                        metadata, reason = match_reference(reference, self.fetch.search(reference))
+                        if metadata:
+                            matched = True
+                            source = metadata["source"]
+                    if reference.locator or matched:
+                        items = self.retrieval.evidence_store.find_source(source)
+                        if not items and self.fetch:
+                            items = self.fetch(source)
             valid = []
             for item in items:
                 self.context.register(item)
                 self.context.get(item.evidence_id)
                 valid.append(item.evidence_id)
-            return CitationIdentity(citation=citation, source=original_source,
-                status="source_found" if valid else "source_not_found", evidence_ids=valid, reason="原文与版本可定位" if valid else reason)
-        except (ValueError, OSError, RuntimeError) as exc:
-            return CitationIdentity(citation=citation, source=original_source, status="source_not_found", reason=f"{reason} {exc}")
+            if valid:
+                reason = (reason + " " if matched else "") + "已定位允许读取的原文与版本。"
+            elif matched:
+                reason += " 文献身份已匹配，但尚无可读取原文，不能以检索摘要核验支持关系。"
+            result = CitationIdentity(citation=citation, source=original,
+                status="source_found" if valid or matched else "source_not_found", evidence_ids=valid,
+                resolved_source=source if valid or matched else None, metadata=metadata or {}, reason=reason)
+        except WorkflowInterrupted:
+            raise
+        except Exception as exc:
+            result = CitationIdentity(citation=citation, source=original,
+                status="source_found" if matched else "source_not_found",
+                resolved_source=source if matched else None, metadata=metadata or {},
+                reason=("文献身份已匹配，但原文暂不可读取。" if matched else reason) + f" 核验未完成：{exc}")
+        self._resolved[original] = result
+        return result

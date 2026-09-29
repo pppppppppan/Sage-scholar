@@ -135,7 +135,7 @@ export async function uploadFile(file: File): Promise<SaveReportResult> {
 
 export type ResearchEvent =
   | { type: "initializing_tools" | "research_started" | "audit_started"; message: string }
-  | { type: "audit_claim_checked"; claim: { claim_id: string }; support_status: string }
+  | { type: "audit_claim_checked"; claim: { claim_id: string }; support_status: string; citation_status?: "present" | "missing" }
   | { type: "tool_available" | "tool_unavailable"; server: string; message: string; reason?: string | null }
   | { type: "plan"; sub_questions: { label: string; question: string }[] }
   | { type: "research"; question: string; preview: string; tool_call_counts: Record<string, number>; status?: "completed" | "failed" }

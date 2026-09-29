@@ -1,6 +1,6 @@
 # SAGE Scholar
 
-SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。当前 V4 已支持 Direct、文档 QA、异步 Deep Research 与 Citation Audit，并统一上下文预算、显式 Memory 和可恢复 Run。统一查询接口先经过 Router，再按任务复杂度选择执行链。FastAPI 只处理协议，业务编排集中在 `QueryService`，长任务生命周期由 `RunManager` 管理，研究 Graph 只维护 workflow 内部状态。
+SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。当前 V4.1 已支持 Direct、文档 QA、异步 Deep Research 与 Citation Audit，并统一上下文预算、显式 Memory 和可恢复 Run。统一查询接口先经过 Router，再按任务复杂度选择执行链。FastAPI 只处理协议，业务编排集中在 `QueryService`，长任务生命周期由 `RunManager` 管理，研究 Graph 只维护 workflow 内部状态。
 
 ```mermaid
 flowchart LR
@@ -16,6 +16,17 @@ flowchart LR
     RM --> SSE[SSE Events]
     SSE --> UI
 ```
+
+## V4.1：Citation Audit correctness patch（2026-09-29）
+
+- 普通参考文献解析常见作者/题名/年份、APA 和引号题名格式；DOI/arXiv/URL 优先定位，否则在允许联网时复用 paper-search 学术检索。检索只确认身份，摘要不会作为最终 Evidence。
+- 题名规范化后匹配，要求已提供的作者、年份也一致。仅一个可确认身份时读取原文；不同 ID 的多个候选或元数据冲突不会随便选第一条。检索未找到/工具不可用返回 source_not_found，不能据此判断伪造。
+- 无引用主张返回 `citation_status=missing`、`source_identity_status=not_applicable`、`support_status=uncertain`，报告显示 missing_citation；所选文档仅是资料范围，不会自动绑定为原 citation。
+- 元数据确认身份但全文不可用时，身份可为 source_found，支持程度仍是 uncertain；继续使用原 Evidence/Claim/Verifier，不把 metadata 或模型总结当正文证据。
+- Audit checkpoint 版本标识更新，避免恢复 V4 中已经自动绑定所选文档的旧中间结果；未完成的旧 Audit 需明确重新开始。Research checkpoint 与恢复架构不变，已完成历史报告不回写。
+- 解析采用保守规则：特殊格式、题名缩写、作者/年份缺失或预印本与发表版年份不同，可能需要用户补 DOI/arXiv；不以模糊相似度替代文献身份确认。
+
+- 验证：新增 26 项身份/引用回归，全量后端 190 项通过；compileall、前端 lint/build 通过。外部 MCP/LLM 使用测试替身，真实联网可用性与模型判断仍需实际案例检查。
 
 ## V4：Citation Audit、Context/Memory、持久化恢复（2026-09-28）
 
@@ -168,10 +179,10 @@ npm --prefix web run build
 
 ## 已知边界
 
-- `RunManager` 当前只提供进程内状态和事件回放；服务重启后不能 resume。
-- Deep Research 已接入 Note/Claim/Evidence 与引用核验；尚无持久化 checkpoint、完整审计 lineage 和全量 Context Manager。语义核验依赖模型判断，仍需真实样本检验。
+- Run/事件/预算已持久化；兼容 checkpoint 可恢复原任务。缺失、不兼容或有未知工具调用时明确 interrupted/restart_required，需用户重新开始。
+- Deep Research 已接入 Note/Claim/Evidence、Context Manager 和持久化 checkpoint。引用支持核验依赖模型判断，仍需真实样本检验；尚无完整审计 lineage。
 - PDF 证据目前可以带来源、版本和可选 section/page 字段，但旧解析链不能稳定提供逐页定位。
-- Search、Citation Audit、Paper2Code、完整 Eval、Trace/监控和代码沙箱仍待实现。
+- Citation Audit 已支持来源身份定位与主张支持核验。Search、Paper2Code、完整 Eval、Trace/监控和代码沙箱仍待实现。
 - 本阶段没有引入 Redis、Celery、Kafka、独立 Worker、认证或多用户并发体系。
 
 工程审计见 [`docs/repository-audit.md`](docs/repository-audit.md)，逐文件迁移来源见 [`docs/migration-map.md`](docs/migration-map.md)。

@@ -9,7 +9,7 @@ from sage_scholar.domain import research, execution
 from sage_scholar.routing import models
 from sage_scholar.audit import models as audit_models
 
-SCHEMAS = {"deep_research": "research-v4-1", "citation_audit": "audit-v4-1"}
+SCHEMAS = {"deep_research": "research-v4-1", "citation_audit": "audit-v4.1-1"}
 
 
 class Checkpoints:

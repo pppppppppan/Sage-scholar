@@ -93,7 +93,7 @@ export default function ResearchProgress({
           }));
           break;
         case "audit_claim_checked":
-          setInitialization((prev) => ({ message: `已核验 ${event.claim.claim_id}：${event.support_status}`, ready: true, tools: prev?.tools || {} }));
+          setInitialization((prev) => ({ message: `已核验 ${event.claim.claim_id}：${event.citation_status === "missing" ? "缺少引用" : event.support_status}`, ready: true, tools: prev?.tools || {} }));
           break;
         case "research_started":
           setInitialization((prev) => ({ message: event.message, ready: true, tools: prev?.tools || {} }));
