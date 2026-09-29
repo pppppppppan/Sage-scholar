@@ -27,3 +27,11 @@ class JsonEvidenceStore:
         path = self._path(evidence_id)
         with file_lock(path):
             return EvidenceRef.model_validate(json.loads(path.read_text())) if path.exists() else None
+
+    def find_source(self, source_id: str) -> list[EvidenceRef]:
+        result = []
+        for path in sorted(self.directory.glob("ev_*.json")):
+            item = self.get(path.stem)
+            if item and item.source_id == source_id:
+                result.append(item)
+        return result

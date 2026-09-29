@@ -1,0 +1,161 @@
+import asyncio
+import json
+
+import pytest
+
+from sage_scholar.domain.execution import RunOutcome
+from sage_scholar.runtime import RunManager
+from sage_scholar.runtime.models import RunEvent, RunSnapshot, RunStatus, utc_now
+from sage_scholar.runtime.store import RunStore
+from sage_scholar.runtime.checkpoints import Checkpoints
+from sage_scholar.runtime.journal import JournaledTool, UnknownToolExecution, DurableResearcher
+from sage_scholar.research.budget import ResearchBudget, BudgetedTool
+from sage_scholar.graph.graph_builder import build_graph
+from research_fakes import contract, FakeSupervisor, FakeResearcher, FakeWriter, CompleteReview, SupportedVerifier
+from sage_scholar.tools.base_tool import BaseTool
+
+
+def graph(checkpoints, calls):
+    class Researcher(FakeResearcher):
+        def run(self, *args, **kwargs):
+            calls.append(True)
+            return super().run(*args, **kwargs)
+    return build_graph(FakeSupervisor(), lambda _: Researcher(), FakeWriter(),
+                       gap_reviewer=CompleteReview(), verifier=SupportedVerifier(), checkpointer=checkpoints.saver)
+
+
+def test_restart_resumes_same_native_checkpoint_notes_budget_and_sse(tmp_path):
+    calls = []
+    store, checkpoints = RunStore(str(tmp_path)), Checkpoints(str(tmp_path))
+    run_id = "durable-run"
+    request = contract().execution.model_copy(update={"run_id": run_id})
+    g = graph(checkpoints, calls)
+    list(g.stream({"research_contract": contract()}, checkpoints.config(run_id), interrupt_after=["research_node"], durability="sync"))
+    assert calls == [True]
+    assert store.reserve(run_id, 5)
+    now = utc_now()
+    snapshot = RunSnapshot(run_id=run_id, workflow=request.workflow, query=request.query, execution=request,
+        status=RunStatus.RUNNING, created_at=now, updated_at=now, event_cursor=1,
+        checkpoint=checkpoints.reference(run_id, request.workflow))
+    store.append(snapshot, RunEvent(sequence=1, type="research_task_completed", data={"task_id": "T1"}))
+    checkpoints.close(); store.close()
+    # Fresh objects/connections simulate a new process, with no prior message list.
+    store, checkpoints = RunStore(str(tmp_path)), Checkpoints(str(tmp_path))
+    class Runner:
+        async def run(self, request, emit, cancelled):
+            result = await asyncio.to_thread(graph(checkpoints, calls).invoke, None, checkpoints.config(request.run_id))
+            assert result["research_notes"]["T1"].evidence_ids == ["ev_a"]
+            await emit("write", {"report": result["final_report"]})
+            return RunOutcome(result={"report": result["final_report"]})
+    async def scenario():
+        manager = RunManager(store=store, checkpoints=checkpoints)
+        manager.register_runners({request.workflow: Runner()})
+        await manager.recover()
+        events = [event async for event in manager.events(run_id, after=1)]
+        assert events[0].type == "run_resumed" and events[-1].type == "run_finished"
+        assert manager.get(run_id).status == RunStatus.COMPLETED
+        assert manager.get(run_id).consumed_budget["tool_calls"] == 1
+        assert calls == [True]  # Finished ResearchNote not regenerated.
+        await manager.shutdown()
+        again = RunManager(store=store, checkpoints=checkpoints)
+        assert again.get(run_id).result["report"]
+        replay = [e async for e in again.events(run_id, after=1)]
+        assert [e.model_dump() for e in replay] == [e.model_dump() for e in events]
+        assert [e async for e in again.events(run_id, after=events[-1].sequence)] == []
+    asyncio.run(scenario())
+    checkpoints.close(); store.close()
+
+
+@pytest.mark.parametrize("schema", [4, 999])
+def test_missing_or_incompatible_checkpoint_interrupts_instead_of_restarting(tmp_path, schema):
+    store, checkpoints = RunStore(str(tmp_path)), Checkpoints(str(tmp_path))
+    request, now = contract().execution, utc_now()
+    snapshot = RunSnapshot(run_id="lost", workflow=request.workflow, query="q", execution=request,
+        status=RunStatus.RUNNING, schema_version=schema, event_cursor=1, created_at=now, updated_at=now)
+    store.append(snapshot, RunEvent(sequence=1,type="run_started"))
+    async def scenario():
+        manager = RunManager(store=store, checkpoints=checkpoints)
+        await manager.recover()
+        assert manager.get("lost").status == RunStatus.INTERRUPTED
+        assert manager.get("lost").restart_required
+        with pytest.raises(ValueError, match="restart_required"):
+            await manager.resume("lost")
+    asyncio.run(scenario())
+    checkpoints.close(); store.close()
+
+
+def test_committed_tool_results_and_notes_reused_unknown_calls_not_replayed(tmp_path):
+    store = RunStore(str(tmp_path))
+    calls = []
+    class Tool(BaseTool):
+        source_access = "public"
+        def __init__(self): super().__init__("fetch", "fetch", [])
+        def run_tool(self, parameters):
+            calls.append(parameters)
+            return "source evidence"
+    budget = ResearchBudget(5, store, "run")
+    tool = JournaledTool(BudgetedTool(Tool(), budget), store, "run", "task:0")
+    assert tool.run_tool({"url": "a"}) == tool.run_tool({"url": "a"})
+    assert len(calls) == budget.used == 1
+    from hashlib import sha256
+    key = "task:0:" + sha256(json.dumps(["fetch", {"url":"b"}], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    store.call_started("run", key)
+    assert store.unknown_calls("run", mark=True) == [key]
+    with pytest.raises(UnknownToolExecution): tool.run_tool({"url":"b"})
+    assert len(calls) == 1
+    store.close()
+
+
+def test_audit_resume_skips_already_verified_claim_and_preserves_evidence(tmp_path):
+    from types import SimpleNamespace
+    from sage_scholar.audit.service import CitationAuditService
+    from sage_scholar.audit.sources import AuditSources
+    from sage_scholar.audit.graph import build_audit_graph
+    from sage_scholar.infrastructure.evidence_store import JsonEvidenceStore
+    from sage_scholar.domain import EvidenceRef
+    from sage_scholar.routing import Workflow
+    from research_fakes import ScriptedLLM
+    evidence = JsonEvidenceStore(str(tmp_path))
+    item = EvidenceRef.create(source_id="https://example.org/paper", source_version="v1", parser_version="test",
+        original_text="A outperforms B on Dataset X only.", metadata={"kind": "source_content"})
+    evidence.save(item)
+    retrieval = SimpleNamespace(evidence_store=evidence, documents=None)
+    request = contract().execution.model_copy(update={"workflow": Workflow.CITATION_AUDIT, "run_id": "audit-run",
+        "metadata": {"audit": {"claims": [{"text": text, "citations": [item.evidence_id]} for text in ["A beats B on X", "A always beats B"]]}}})
+    checkpoints = Checkpoints(str(tmp_path))
+    llm = ScriptedLLM({"status": "supported", "reason": "X comparison exists"})
+    service = CitationAuditService(retrieval, lambda: llm, checkpoints=checkpoints)
+    sources = AuditSources(retrieval, request.source_policy)
+    audit = build_audit_graph(service, request, llm, sources, checkpointer=checkpoints.saver)
+    list(audit.stream({}, checkpoints.config(request.run_id), interrupt_after=["verify"], durability="sync"))
+    assert len(llm.calls) == 1
+    checkpoints.close()
+    checkpoints = Checkpoints(str(tmp_path))
+    llm = ScriptedLLM({"status": "partially_supported", "reason": "Only X is compared, not every task"})
+    service = CitationAuditService(retrieval, lambda: llm, checkpoints=checkpoints)
+    events = []
+    async def emit(kind, data): events.append((kind,data))
+    outcome = asyncio.run(service.run(request, emit, lambda: False))
+    assert outcome.status == "partial" and len(outcome.result["audit_items"]) == 2
+    assert outcome.result["audit_items"][0]["support_status"] == "supported"
+    assert len(llm.calls) == 1
+    assert [e[1]["claim"]["claim_id"] for e in events if e[0] == "audit_claim_checked"] == ["A2"]
+    assert outcome.result["audit_items"][0]["evidence_ids"] == [item.evidence_id]
+    checkpoints.close()
+
+
+def test_note_commits_before_graph_checkpoint_and_reuses_on_retry(tmp_path):
+    from sage_scholar.domain.research import ResearchTask
+    calls = []
+    class Researcher(FakeResearcher):
+        def run(self, *args):
+            calls.append(True)
+            return super().run(*args)
+    store = RunStore(str(tmp_path))
+    task = ResearchTask(task_id="T1", objective="read")
+    note = DurableResearcher(lambda _: Researcher(), store, "run", lambda: False).run(task, contract())
+    store.close()
+    store = RunStore(str(tmp_path))
+    restored = DurableResearcher(lambda _: Researcher(), store, "run", lambda: False).run(task, contract())
+    assert restored == note and calls == [True]
+    store.close()

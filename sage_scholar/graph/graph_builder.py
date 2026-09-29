@@ -4,6 +4,7 @@ from typing import Annotated, TypedDict
 from langgraph.graph import StateGraph, START, END
 from langgraph.config import get_stream_writer
 from langgraph.types import Send
+from sage_scholar.runtime.journal import WorkflowInterrupted
 
 from sage_scholar.domain.research import (
     Claim, ClaimVerification, GapReview, ReportDraft, ResearchContract, ResearchNote,
@@ -51,7 +52,7 @@ class OutputSchema(TypedDict):
     blocked_by_budget: bool
 
 
-def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier, budget=None):
+def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier, budget=None, checkpointer=None):
     builder = StateGraph(State, input_schema=InputSchema, output_schema=OutputSchema)
 
     def notes(state):
@@ -114,6 +115,8 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier
             if note.task_id != task.task_id:
                 raise ValueError("ResearchNote task_id 不匹配")
             status = "completed"
+        except WorkflowInterrupted:
+            raise
         except Exception as exc:
             note = ResearchNote(task_id=task.task_id, question=task.objective, revision=task.revision,
                                 unknowns=[f"任务失败：{exc}"], metadata={"task_error": str(exc)})
@@ -226,4 +229,4 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier
     builder.add_conditional_edges("verify_node", verification_route, ["revision_node", "render_node"])
     builder.add_edge("revision_node", "write_node")
     builder.add_edge("render_node", END)
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)

@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 from pathlib import Path
 from uuid import uuid4
+from sage_scholar.context.tools import ContextReadTool
+from sage_scholar.runtime.journal import DurableResearcher, JournaledTool, WorkflowInterrupted
 
 from sage_scholar.agents import Researcher, Supervisor, Writer
 from sage_scholar.base import LLMClient
@@ -34,9 +37,10 @@ logger = logging.getLogger(__name__)
 class ResearchRuntime:
     """Composition root for migrated SAGE Research capabilities."""
 
-    def __init__(self, config: Config, llm_client: LLMClient | None = None, pipeline: Pipeline | None = None, retrieval=None, connect_external: bool = True):
+    def __init__(self, config: Config, llm_client: LLMClient | None = None, pipeline: Pipeline | None = None, retrieval=None, connect_external: bool = True, store=None, checkpoints=None, context_manager=None):
         self.config = config
-        self.llm_client = llm_client or LLMClient(model=config.llm.model, timeout=config.llm.timeout)
+        self.store, self.checkpoints, self.context_manager = store, checkpoints, context_manager
+        self.llm_client = llm_client or LLMClient(model=config.llm.model, timeout=config.llm.timeout, context_manager=context_manager)
         token_counter = TokenCounter()
         history_compactor = HistoryCompactor(llm_client=self.llm_client, token_counter=token_counter)
         self.context_builder = ContextBuilder(
@@ -87,7 +91,7 @@ class ResearchRuntime:
                 for status in self.tool_statuses:
                     yield {"initialization_node": status}
 
-    def run_research(self, request: ExecutionRequest):
+    def run_research(self, request: ExecutionRequest, cancelled=lambda: False):
         yield {"initialization_node": {"status": "initializing", "message": "正在初始化研究工具…"}}
         if request.source_policy.permits_web and self._connect_external:
             yield from self._initialize_research_tools()
@@ -95,14 +99,22 @@ class ResearchRuntime:
             request, max_rounds=self.config.max_rounds, max_steps=self.config.max_steps,
         )
         policy = contract.source_policy
-        context = ResearchEvidenceContext(self.retrieval.evidence_store, policy, self.retrieval.documents)
-        budget = ResearchBudget(contract.limits.max_tool_calls)
-        observation_run = uuid4().hex
+        context = ResearchEvidenceContext(self.retrieval.evidence_store, policy, self.retrieval.documents, self.context_manager)
+        durable = bool(self.store and self.checkpoints and request.run_id)
+        budget = ResearchBudget(contract.limits.max_tool_calls, self.store if durable else None, request.run_id)
+        observation_run = request.run_id or uuid4().hex
+        if durable:
+            for identity in self.store.evidence_ids(request.run_id):
+                item = self.retrieval.evidence_store.get(identity)
+                if item:
+                    context.register(item)
 
         def make_tools(task_id, observed_ids, issues):
             def record(evidence):
                 context.register(evidence)
                 observed_ids.add(evidence.evidence_id)
+                if durable:
+                    self.store.register_evidence(request.run_id, evidence.evidence_id)
 
             def observe(observation):
                 if observation.get("kind") == "error":
@@ -115,25 +127,37 @@ class ResearchRuntime:
             def wrap(tool):
                 if tool.source_access == "public":
                     tool = EvidenceTool(tool, self.retrieval.evidence_store, record, observe)
-                return BudgetedTool(tool, budget)
+                tool = BudgetedTool(tool, budget)
+                if durable:
+                    def replay(result):
+                        for identity in set(re.findall(r"ev_[a-zA-Z0-9_-]+", result)):
+                            try:
+                                record(context.get(identity))
+                            except ValueError:
+                                pass
+                    tool = JournaledTool(tool, self.store, request.run_id, task_id, cancelled, replay)
+                return tool
 
-            return self.registry.for_policy(
+            tools = self.registry.for_policy(
                 self.whitelist, policy,
                 local_tools=[RAGTool(self.retrieval, policy, record)], wrap=wrap,
             )
+            if self.context_manager:
+                tools.append(ContextReadTool(self.context_manager, context, observation_run))
+            return tools
 
         available = make_tools("capabilities", set(), [])
         yield {"policy_node": {
             "source_policy": policy.model_dump(mode="json"),
             "available_tools": [tool.name for tool in available],
         }}
-        if not available:
+        if not any(t.name != "read_context_artifact" for t in available) and not (durable and self.checkpoints.saver.get_tuple(self.checkpoints.config(request.run_id))):
             yield {"outcome_node": {"remaining_gaps": ["资料策略下没有可用工具，无法进行有证据的研究"]}}
             return
 
         yield {"initialization_node": {"status": "started", "message": "正在规划研究任务…"}}
         review_llm = (
-            LLMClient(model=self.config.llm.review_model, timeout=self.config.llm.timeout)
+            LLMClient(model=self.config.llm.review_model, timeout=self.config.llm.timeout, context_manager=self.context_manager)
             if self.config.llm.review_model else self.llm_client
         )
         supervisor = Supervisor(
@@ -145,30 +169,45 @@ class ResearchRuntime:
             temperature=self.config.llm.writer_temperature,
         )
 
-        def create_researcher(task_id):
+        def build_researcher(task_id, revision=0):
             observed_ids, issues = set(), []
             return Researcher(
                 name=task_id, llm=self.llm_client, context_builder=self.context_builder,
-                tool_list=make_tools(task_id, observed_ids, issues),
+                tool_list=make_tools(f"{task_id}:{revision}", observed_ids, issues),
                 max_steps=contract.limits.max_steps, temperature=self.config.llm.research_temperature,
                 evidence_context=context, observed_ids=lambda: sorted(observed_ids),
                 observed_issues=lambda: list(issues),
             )
 
+        def create_researcher(task_id):
+            if durable:
+                return DurableResearcher(lambda task: build_researcher(task.task_id, task.revision),
+                                         self.store, request.run_id, cancelled)
+            return build_researcher(task_id)
+
         graph = build_graph(
             supervisor, create_researcher, writer,
             gap_reviewer=GapReviewer(review_llm, context),
             verifier=CitationVerifier(review_llm, context), budget=budget,
+            checkpointer=self.checkpoints.saver if durable else None,
         )
         final_report = None
-        for _mode, event in graph.stream(
-            {"research_contract": contract},
-            config={"recursion_limit": 20 + 3 * contract.limits.max_tasks * (contract.limits.max_rounds + 1)},
-            stream_mode=["updates", "custom"],
-        ):
-            if "render_node" in event:
-                final_report = event["render_node"]["report_result"]
-            yield event
+        graph_config = self.checkpoints.config(request.run_id) if durable else {}
+        graph_config["recursion_limit"] = 20 + 3 * contract.limits.max_tasks * (contract.limits.max_rounds + 1)
+        snapshot = graph.get_state(graph_config) if durable else None
+        graph_input = None if snapshot and snapshot.values else {"research_contract": contract}
+        if snapshot and snapshot.values and not snapshot.next:
+            final_report = snapshot.values.get("report_result")
+            if final_report:
+                yield {"render_node": {"report_result": final_report}}
+        else:
+            for _mode, event in graph.stream(graph_input, config=graph_config,
+                                            stream_mode=["updates", "custom"], **({"durability": "sync"} if durable else {})):
+                if cancelled():
+                    raise WorkflowInterrupted("研究已中断，checkpoint 已保留")
+                if "render_node" in event:
+                    final_report = event["render_node"]["report_result"]
+                yield event
         yield {"evidence_node": {"evidence_ids": context.ids()}}
         yield {"outcome_node": {
             "remaining_gaps": final_report.remaining_gaps if final_report else ["研究未生成报告"],
@@ -260,7 +299,9 @@ class ResearchRuntimeProvider:
         config: Config,
         llm_client_factory,
         retrieval,
+        store=None, checkpoints=None, context_manager=None,
     ):
+        self.store, self.checkpoints, self.context_manager = store, checkpoints, context_manager
         self._config = config
         self._llm_client_factory = llm_client_factory
         self._retrieval = retrieval
@@ -276,6 +317,7 @@ class ResearchRuntimeProvider:
                 self._runtimes[require_external] = ResearchRuntime(
                     self._config, llm_client=self._llm_client_factory(),
                     retrieval=self._retrieval, connect_external=require_external,
+                    store=self.store, checkpoints=self.checkpoints, context_manager=self.context_manager,
                 )
             return self._runtimes[require_external]
 

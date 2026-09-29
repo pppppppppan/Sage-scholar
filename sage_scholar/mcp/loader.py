@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from .client import MCPClient, MCPServerConfig
 
 logger = logging.getLogger(__name__)
-RESEARCH_SERVERS = frozenset({"brave-search", "tavily", "fetch", "paper-search"})
+RESEARCH_SERVERS = frozenset({"tavily", "fetch", "paper-search"})
 CAPABILITY_SERVERS = {"research": RESEARCH_SERVERS, "pdf": frozenset({"pdfmux"}),
                       "paper": frozenset({"paper-search"})}
 _LABELS = {"brave-search": "Brave 搜索", "tavily": "Tavily 搜索", "fetch": "网页读取",
@@ -43,10 +43,12 @@ def iter_mcp_clients(json_path, *, server_names, connect_timeout=12):
         for key, value in (config.get("env") or {}).items():
             if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
                 value = os.getenv(value[2:-1])
-            if value is None or (isinstance(value, str) and not value.strip()):
-                if key not in (config.get("optional_env") or []):
-                    missing.append(key)
-                continue
+                if value is None or not value.strip():
+                    if key not in (config.get("optional_env") or []):
+                        missing.append(key)
+                    continue
+            # Literal strings, including "" used to clear inherited proxies,
+            # must reach the child unchanged. Only placeholders require lookup.
             env[key] = value
         if missing:
             logger.warning("[MCP] skipping %s: missing configuration %s", name, ", ".join(missing))

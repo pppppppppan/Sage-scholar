@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import WorkspacePanel from "@/components/WorkspacePanel";
 import InlineAnswer from "@/components/InlineAnswer";
 import LibraryDrawer from "@/components/LibraryDrawer";
 import QueryInput from "@/components/QueryInput";
@@ -8,7 +9,7 @@ import ReportView from "@/components/ReportView";
 import ResearchProgress from "@/components/ResearchProgress";
 import StreamingText from "@/components/StreamingText";
 import {
-  submitQuery,
+  submitQuery, getRun, auditReport, type SavedRun,
   type ChatMessage,
   type EvidenceRef,
   type LibraryDoc,
@@ -37,6 +38,27 @@ export default function Home() {
   const [stats, setStats] = useState<{ total_calls: number; total_tokens: number } | null>(null);
   const [exiting, setExiting] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const [restoredRun, setRestoredRun] = useState(false);
+  const [streamGeneration, setStreamGeneration] = useState(0);
+  const [terminalAfter, setTerminalAfter] = useState(0);
+
+  function openSavedRun(saved: SavedRun) {
+    sessionStorage.setItem("sage-active-run", saved.run_id);
+    setRunId(saved.run_id); setActiveQuery(saved.query); setActiveTurnId(null);
+    setRestoredRun(true); setStats(null);
+    setStreamGeneration(value => value + 1);
+    setTerminalAfter(saved.event_cursor);
+    const active = ["pending", "running", "cancel_requested"].includes(saved.status);
+    setStage(active ? "researching" : "report");
+    setReport(active ? "" : (saved.result?.report || saved.error || saved.reason || "任务未生成报告。"));
+  }
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem("sage-active-run");
+    let alive = true;
+    if (stored) getRun(stored).then(saved => { if (alive) openSavedRun(saved); }).catch(() => { sessionStorage.removeItem("sage-active-run"); });
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     if (stage === "chat") {
@@ -49,9 +71,8 @@ export default function Home() {
       .filter((turn) => turn.status === "done" && turn.answer)
       .flatMap<ChatMessage>((turn) => [
         { role: "user", content: turn.query },
-        { role: "assistant", content: turn.answer!.slice(0, 20_000) },
-      ])
-      .slice(-20);
+        { role: "assistant", content: turn.answer! },
+      ]);
   }
 
   async function handleQuerySubmit(value: string) {
@@ -77,6 +98,7 @@ export default function Home() {
     setSending(true);
 
     try {
+      setRestoredRun(false); setTerminalAfter(0);
       const response = await submitQuery(value, history, selectedDocuments.map((doc) => doc.document_id));
       if (response.status === "accepted" && response.run_id) {
         setTurns((previous) =>
@@ -86,6 +108,7 @@ export default function Home() {
               : turn,
           ),
         );
+        sessionStorage.setItem("sage-active-run", response.run_id);
         setRunId(response.run_id);
         setStage("researching");
         return;
@@ -134,6 +157,8 @@ export default function Home() {
   }
 
   function handleNewConversation() {
+    sessionStorage.removeItem("sage-active-run");
+    setRestoredRun(false);
     setExiting(true);
     setTimeout(() => {
       setStage("input");
@@ -153,6 +178,7 @@ export default function Home() {
 
   return (
     <>
+      <WorkspacePanel onRun={openSavedRun} />
       <LibraryDrawer selectedDocuments={selectedDocuments} onSelectionChange={setSelectedDocuments} />
       {selectedDocuments.length > 0 && (
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-2 text-sm text-muted-foreground">
@@ -211,8 +237,8 @@ export default function Home() {
                 <div className="w-full max-w-3xl rounded-2xl bg-foreground/[0.04] px-5 py-3 text-sm text-foreground/75">
                   {activeQuery}
                 </div>
-                {runId && (
-                  <ResearchProgress runId={runId} onReport={handleResearchReport} />
+                {runId && !(restoredRun && isReport) && (
+                  <ResearchProgress key={`${runId}-${streamGeneration}`} terminalAfter={terminalAfter} runId={runId} onReport={handleResearchReport} />
                 )}
                 {isReport && (
                   <div className="sticky bottom-0 w-full max-w-2xl bg-gradient-to-t from-background from-80% to-transparent pb-2 pt-5">
@@ -227,7 +253,13 @@ export default function Home() {
             data-report-panel
             className={`thin-scroll min-h-0 min-w-0 flex-1 overflow-y-auto transition-opacity duration-500 ${isReport ? "border-l border-foreground/8 bg-surface/40 opacity-100" : "pointer-events-none opacity-0"}`}
           >
-            {report && <ReportView report={report} stats={stats} />}
+            {report && <>
+              {runId && <button className="m-4 text-sm underline" onClick={async () => {
+                try { openSavedRun(await auditReport(runId)); }
+                catch (e) { setReport(report + `\n\n核验启动失败：${e instanceof Error ? e.message : "请求失败"}`); }
+              }}>核验这份报告的引用</button>}
+              <ReportView report={report} stats={stats} />
+            </>}
           </div>
         </div>
       )}

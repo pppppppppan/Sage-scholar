@@ -132,15 +132,57 @@ def test_optional_failure_does_not_delay_available_peer_or_start_missing_key(ser
             client.disconnect()
 
 
-def test_invalid_or_empty_optional_config_is_skipped_before_spawn(tmp_path, monkeypatch):
+def test_invalid_or_missing_placeholder_config_is_skipped_before_spawn(tmp_path, monkeypatch):
+    monkeypatch.delenv("SAGE_TEST_MISSING_KEY", raising=False)
     def forbidden(*args, **kwargs):
         raise AssertionError("invalid or missing credentials must not start a process")
     monkeypatch.setattr(MCPClient, "connect", forbidden)
     config = tmp_path / "invalid.json"
     config.write_text(json.dumps({
         "fetch": "invalid entry",
-        "brave-search": {"command": "unused", "args": [], "env": {"BRAVE_API_KEY": ""}},
+        "brave-search": {"command": "unused", "args": [], "env": {"BRAVE_API_KEY": "${SAGE_TEST_MISSING_KEY}"}},
     }))
     results = list(iter_mcp_clients(config, server_names={"fetch", "brave-search"}))
     assert {status["reason"] for status, _ in results} == {"invalid_config", "missing_config"}
     assert all(client is None for _, client in results)
+
+
+@pytest.mark.parametrize("resolved", [None, "", "   "])
+def test_loader_only_treats_empty_placeholders_as_missing(tmp_path, monkeypatch, resolved):
+    from sage_scholar.mcp import loader
+    if resolved is None:
+        monkeypatch.delenv("SAGE_TEST_EMPTY", raising=False)
+    else:
+        monkeypatch.setenv("SAGE_TEST_EMPTY", resolved)
+    monkeypatch.setenv("all_proxy", "http://inherited.invalid:8080")
+    received = []
+    class Client:
+        def __init__(self, config):
+            self.config = config
+        def connect(self):
+            received.append(self.config.to_stdio_params().env)
+        def disconnect(self):
+            pass
+    monkeypatch.setattr(loader, "MCPClient", Client)
+    path = tmp_path / "env.json"
+    path.write_text(json.dumps({
+        "fetch": {"command": "uvx", "args": ["mcp-server-fetch"],
+                  "env": {"all_proxy": "", "LITERAL_SPACES": "  ", "OPTIONAL": "${SAGE_TEST_EMPTY}"},
+                  "optional_env": ["OPTIONAL"]},
+        "tavily": {"command": "unused", "args": [], "env": {"KEY": "${SAGE_TEST_EMPTY}"}},
+    }))
+    results = list(loader.iter_mcp_clients(path, server_names={"fetch", "tavily"}))
+    statuses = {status["server"]: status for status, _ in results}
+    assert statuses["fetch"]["status"] == "available"
+    assert statuses["tavily"]["reason"] == "missing_config"
+    assert len(received) == 1
+    assert received[0]["all_proxy"] == "" and received[0]["LITERAL_SPACES"] == "  "
+    assert "OPTIONAL" not in received[0]
+
+
+def test_project_configuration_disables_brave_and_preserves_fetch():
+    from pathlib import Path
+    from sage_scholar.mcp.loader import RESEARCH_SERVERS
+    config = json.loads((Path(__file__).resolve().parents[1] / "configs/mcp_servers.json").read_text())
+    assert "brave-search" not in config and "brave-search" not in RESEARCH_SERVERS
+    assert config["fetch"]["env"]["all_proxy"] == ""

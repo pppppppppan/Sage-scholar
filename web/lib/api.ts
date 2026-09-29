@@ -134,7 +134,8 @@ export async function uploadFile(file: File): Promise<SaveReportResult> {
 }
 
 export type ResearchEvent =
-  | { type: "initializing_tools" | "research_started"; message: string }
+  | { type: "initializing_tools" | "research_started" | "audit_started"; message: string }
+  | { type: "audit_claim_checked"; claim: { claim_id: string }; support_status: string }
   | { type: "tool_available" | "tool_unavailable"; server: string; message: string; reason?: string | null }
   | { type: "plan"; sub_questions: { label: string; question: string }[] }
   | { type: "research"; question: string; preview: string; tool_call_counts: Record<string, number>; status?: "completed" | "failed" }
@@ -156,52 +157,109 @@ export type ResearchEvent =
 export function startRunEvents(
   runId: string,
   onEvent: (event: ResearchEvent) => void,
+  terminalAfter = 0,
 ): () => void {
   const controller = new AbortController();
-  fetch(`${API_BASE}/api/runs/${encodeURIComponent(runId)}/events`, {
-    signal: controller.signal,
-  })
-    .then((response) => {
-      if (!response.ok || !response.body) {
-        throw new Error(`事件流连接失败 (${response.status})`);
-      }
+  let cursor = 0;
+  let terminal = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let retries = 0;
+  async function connect(): Promise<void> {
+    try {
+      const response = await fetch(`${API_BASE}/api/runs/${encodeURIComponent(runId)}/events`, {
+        signal: controller.signal, headers: cursor ? { "Last-Event-ID": String(cursor) } : {},
+      });
+      if (!response.ok || !response.body) throw new Error(`事件流连接失败 (${response.status})`);
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-
-      function pump(): Promise<void> {
-        return reader.read().then(({ done, value }) => {
-          if (done) return;
-          buffer += decoder.decode(value, { stream: true });
-          const blocks = buffer.split("\n\n");
-          buffer = blocks.pop()!;
-          for (const block of blocks) {
-            let eventType = "";
-            let data = "";
-            for (const line of block.split("\n")) {
-              if (line.startsWith("event: ")) eventType = line.slice(7);
-              else if (line.startsWith("data: ")) data = line.slice(6);
-            }
-            if (
-              eventType &&
-              data &&
-              ["initializing_tools", "tool_available", "tool_unavailable", "research_started",
-               "plan", "research", "review", "write", "stats", "run_finished", "run_cancelled", "run_interrupted", "error",
-               "research_planned", "research_task_started", "research_task_completed", "gap_reviewed",
-               "report_drafting", "citation_verifying", "report_revising", "report_completed"].includes(eventType)
-            ) {
-              onEvent({ type: eventType, ...JSON.parse(data) } as ResearchEvent);
-            }
+      while (!controller.signal.aborted) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop()!;
+        for (const block of blocks) {
+          let type = "", data = "", sequence = 0;
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event: ")) type = line.slice(7);
+            if (line.startsWith("data: ")) data = line.slice(6);
+            if (line.startsWith("id: ")) sequence = Number(line.slice(4));
           }
-          return pump();
-        });
+          if (sequence && sequence <= cursor) continue;
+          if (type && data) {
+            const payload = JSON.parse(data);
+            const isTerminal = ["run_finished", "run_cancelled", "run_interrupted", "error"].includes(type);
+            // A resumed run replays its history; old interruption/error events are not its current end.
+            if (!isTerminal || !sequence || sequence >= terminalAfter) {
+              onEvent({ type, ...payload } as ResearchEvent);
+              if (isTerminal) terminal = true;
+            }
+            if (sequence) cursor = sequence;
+            retries = 0;
+          }
+        }
       }
-      return pump();
-    })
-    .catch((error: Error) => {
-      if (error.name !== "AbortError") {
-        onEvent({ type: "error", message: error.message });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      if (retries >= 4) {
+        onEvent({ type: "error", message: error instanceof Error ? error.message : "事件流连接失败，可从任务列表重新查看" });
+        return;
       }
-    });
-  return () => controller.abort();
+    }
+    if (!terminal && !controller.signal.aborted) timer = setTimeout(() => { void connect(); }, Math.min(1000 * 2 ** retries++, 8000));
+  }
+  void connect();
+  return () => { controller.abort(); clearTimeout(timer); };
+}
+
+export interface SavedMemory {
+  memory_id: string;
+  content: string;
+  type: "preference" | "note";
+  scope: "workspace" | "session";
+  session_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SavedRun {
+  run_id: string;
+  workflow: Workflow;
+  query: string;
+  status: "pending" | "running" | "cancel_requested" | "completed" | "partial" | "failed" | "cancelled" | "interrupted";
+  result: { report?: string; audit_items?: unknown[] } | null;
+  error: string | null;
+  reason: string | null;
+  remaining_gaps: string[];
+  restart_required: boolean;
+  event_cursor: number;
+  consumed_budget: Record<string, number>;
+}
+
+export async function getRun(runId: string): Promise<SavedRun> {
+  return (await expectJson<{ run: SavedRun }>(await fetch(`${API_BASE}/api/runs/${encodeURIComponent(runId)}`))).run;
+}
+export async function listRuns(): Promise<SavedRun[]> {
+  return (await expectJson<{ runs: SavedRun[] }>(await fetch(`${API_BASE}/api/runs`))).runs;
+}
+export async function runAction(runId: string, action: "resume" | "restart" | "cancel"): Promise<SavedRun> {
+  return (await expectJson<{ run: SavedRun }>(await fetch(`${API_BASE}/api/runs/${encodeURIComponent(runId)}/${action}`, { method: "POST" }))).run;
+}
+export async function auditReport(runId: string): Promise<SavedRun> {
+  return (await expectJson<{ run: SavedRun }>(await fetch(`${API_BASE}/api/audits`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ report_run_id: runId }),
+  }))).run;
+}
+export async function listMemories(): Promise<SavedMemory[]> {
+  return expectJson(await fetch(`${API_BASE}/api/memories`));
+}
+export async function saveMemory(content: string, type: SavedMemory["type"], memoryId?: string): Promise<SavedMemory> {
+  return expectJson(await fetch(`${API_BASE}/api/memories${memoryId ? `/${encodeURIComponent(memoryId)}` : ""}`, {
+    method: memoryId ? "PUT" : "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, type, scope: "workspace", confirmed: true }),
+  }));
+}
+export async function deleteMemory(memoryId: string): Promise<void> {
+  await expectJson(await fetch(`${API_BASE}/api/memories/${encodeURIComponent(memoryId)}`, { method: "DELETE" }));
 }

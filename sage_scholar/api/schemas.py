@@ -12,7 +12,7 @@ from sage_scholar.runtime import RunSnapshot
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
-    content: str = Field(min_length=1, max_length=20_000)
+    content: str = Field(min_length=1, max_length=200_000)
 
 
 class QueryRequest(BaseModel):
@@ -26,7 +26,7 @@ class QueryRequest(BaseModel):
     session_id: str | None = None
     budget: dict = Field(default_factory=dict)
     metadata: dict = Field(default_factory=dict)
-    history: list[ChatMessage] = Field(default_factory=list, max_length=20)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=1000)
 
     @field_validator("query")
     @classmethod

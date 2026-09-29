@@ -3,6 +3,7 @@ import logging
 import re
 import uuid
 
+from sage_scholar.runtime.journal import WorkflowInterrupted
 from sage_scholar.domain.research import NoteDraft, ResearchNote
 from sage_scholar.research.structured import structured_response
 from sage_scholar.research.notes import validate_note
@@ -191,13 +192,10 @@ class Researcher(AgentBase):
                 tool_result = tool.run_tool(parameters)
                 raw_len = len(tool_result)
 
-                if raw_len > MAX_TOOL_RESULT_CHARS:
-                    tool_result = tool_result[:MAX_TOOL_RESULT_CHARS]
-                    tool_result += f"\n\n[截断: 原始 {raw_len} 字符, 保留 {MAX_TOOL_RESULT_CHARS} 字符]"
-                    logger.info("[Researcher:%s] 工具结果截断: %s %d -> %d 字符", self.name, name, raw_len, MAX_TOOL_RESULT_CHARS)
-
                 logger.info("[Researcher:%s] 工具结果: %s, %d 字符", self.name, name, raw_len)
 
+            except WorkflowInterrupted:
+                raise
             except Exception as e:
                 tool_result = str(e)
                 self._tool_errors.append(f"{name}: {e}")

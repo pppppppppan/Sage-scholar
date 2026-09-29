@@ -1,6 +1,6 @@
 # SAGE Scholar
 
-SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。当前版本已打通第一条完整链路：统一查询接口先经过 Router，再按任务复杂度执行 Direct、文档 QA 或异步 Deep Research。FastAPI 只处理协议，业务编排集中在 `QueryService`，长任务生命周期由 `RunManager` 管理，研究 Graph 只维护 workflow 内部状态。
+SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。当前 V4 已支持 Direct、文档 QA、异步 Deep Research 与 Citation Audit，并统一上下文预算、显式 Memory 和可恢复 Run。统一查询接口先经过 Router，再按任务复杂度选择执行链。FastAPI 只处理协议，业务编排集中在 `QueryService`，长任务生命周期由 `RunManager` 管理，研究 Graph 只维护 workflow 内部状态。
 
 ```mermaid
 flowchart LR
@@ -16,6 +16,17 @@ flowchart LR
     RM --> SSE[SSE Events]
     SSE --> UI
 ```
+
+## V4：Citation Audit、Context/Memory、持久化恢复（2026-09-28）
+
+- Citation Audit 复用 V3 Claim / Evidence / CitationVerifier，区分来源未找到和主张不支持；支持报告正文、Claim + Citation、已有报告 Run。前端报告旁新增“核验这份报告的引用”。
+- 每次 LLM 调用统一计算 system、prompt、history、工具 schema、笔记/证据、Memory 和输出预留；大工具结果外置，可按 ID 回读，保留 SourcePolicy、用户限制、冲突/未知及工具配对。
+- 仅显式“记住：…”或在“任务与记忆”面板确认的内容进入 Memory；支持增删改查，当前指令优先，Memory 不进入 Evidence/RAG。
+- `data/runtime.sqlite3` 持久化 Run、事件、预算、工具结果及 ResearchNote；`data/checkpoints.sqlite3` 使用 LangGraph 官方 SQLite saver 保存图状态。SSE 先落库再发送。
+- 重启时有兼容 checkpoint 且无未知工具调用的任务继续原 Run；否则标记 interrupted/restart_required。刷新和 SSE 重连只查询/重放，不创建新任务。
+- 新依赖：`langgraph-checkpoint-sqlite>=3.1,<4`。更新后先 `python -m pip install -r requirements.txt`，再重启后端；沿用原启动命令。
+- 检查：后端 164 项、前端 10 项测试通过；compileall、lint、production build 通过。外部 LLM 语义质量仍需实际论文案例验证。
+- 未引入 Paper2Code、分布式队列或新的研究主链。完整接口示例、恢复边界、参考设计与技术债见本地 [V4 交付说明](docs/v4-delivery.md)。
 
 ## V3.1 correctness patch（2026-09-27）
 
@@ -52,15 +63,15 @@ flowchart LR
 ## 当前可以运行的功能
 
 - `Direct`：日期、星期等本地确定性问题不调用模型；其他简单问题通过统一 Model Gateway 回答。
-- 连续对话：回答后保留输入框和本轮消息，最近 20 条用户/助手消息会作为 Direct 追问上下文；点击“新对话”可清空本轮上下文。
+- 连续对话：回答后保留输入框和本轮消息，本轮历史交给统一 Context Manager，压缩旧助手说明时保留用户限制；点击“新对话”可清空本轮上下文。
 - `QA`：从上传的论文/文档进行 BM25 + 向量检索、RRF、rerank，并以结构化 `EvidenceRef` 返回证据。
 - `Deep Research`：复用 SAGE Research 的 LangGraph 与并行 ReAct，现为 contract → task DAG → ResearchNote → gap review/targeted retry → Claim → citation verification/revision → renderer，由后台 `Run` 执行并通过 SSE 推送进度。
 - 研究报告只作为 Run 产物返回，不会自动写回 RAG；仅在用户主动点击保存时进入文档库。
 - 文档库：上传、导入、列表、删除、保存研究报告。
-- 长任务：创建、查询状态、取消、SSE 事件回放；当前状态保存在单进程内存中。
+- 长任务：创建、查询、取消、持久化 SSE 回放、兼容 checkpoint 恢复、显式重新开始；状态保存在本地 SQLite。
 - 自适应路由：`今天是星期几` 走 Direct，`帮我调研 AI4CFD 领域的主要方法` 走 Deep Research；指代论文但未选择文档时返回澄清提示。
 
-Router 已为 `Search`、`Citation Audit` 和 `Paper2Code` 建立稳定枚举与返回协议，但这三条执行链尚未接入，调用时会明确返回 `not_implemented`，不会伪造结果。
+Router 已为 `Search` 和 `Paper2Code` 建立稳定枚举与返回协议，但这两条执行链尚未接入，调用时会明确返回 `not_implemented`，不会伪造结果。
 
 ## 目录
 
@@ -70,13 +81,15 @@ sage-scholar/
 │   ├── api/              # HTTP、schema、SSE
 │   ├── application/      # Query/Direct/QA/Research/Document services
 │   ├── routing/          # workflow 与 source policy 判断
-│   ├── runtime/          # Run 生命周期、取消、事件回放
+│   ├── runtime/          # SQLite Run/事件/预算、工具 journal、LangGraph checkpoint
 │   ├── domain/           # Evidence 等共享领域模型
 │   ├── infrastructure/   # 依赖组装与旧实现 adapter
 │   ├── research/         # Deep Research runtime
 │   ├── graph/            # LangGraph workflow
 │   ├── rag/              # hybrid retrieval
-│   ├── context/          # 现有 history compaction
+│   ├── audit/            # Claim/source 解析与复用 CitationVerifier 的 AuditGraph
+│   ├── memory/           # 用户显式确认的偏好/笔记 CRUD
+│   ├── context/          # 完整请求预算、保护信息、artifact 外置与回读
 │   ├── tools/            # 统一工具基础接口与 registry
 │   ├── library/          # 文档转换和文档库
 │   ├── mcp/              # MCP client/adapter
@@ -113,7 +126,7 @@ cp .env.example .env
 
 - 普通 Direct 和 Deep Research 需要所选 LLM provider 的 key。
 - 文档 QA/入库默认使用本地 Embedding，无需向量 API Key；首次使用需下载模型。
-- Brave、Tavily、GitHub 和其他 MCP 服务都是可选项；未配置的服务会被跳过。
+- Tavily、GitHub 和其他 MCP 服务都是可选项；未配置的服务会被跳过。
 - `/api/health`、日期/星期 Direct 和 Router 测试不需要任何 key。
 
 ## 启动
@@ -166,7 +179,7 @@ npm --prefix web run build
 ## V3.2 可用性修补
 
 - Direct、QA 与 Research Report 共享 MarkdownContent（GFM / remark-math / KaTeX）和公式规范化逻辑，保留金额、环境变量与代码中的普通美元符号。
-- MCP 在首次需要时按能力加载：公网研究只选 Brave/Tavily、fetch、paper-search；PDF 入库只选 pdfmux；arXiv 入库只选 paper-search。Direct、本地 QA 和禁止联网的研究不连接 Web MCP，GitHub 不随研究启动。
+- MCP 在首次需要时按能力加载：公网研究只选 Tavily、fetch、paper-search；PDF 入库只选 pdfmux；arXiv 入库只选 paper-search。Direct、本地 QA 和禁止联网的研究不连接 Web MCP，GitHub 不随研究启动。
 - `.env` 的 `MCP_CONNECT_TIMEOUT=12` 设置每个服务的启动、握手及工具列表总期限（秒）。可选服务并行连接，失败后清理会有额外的有限等待，其他服务继续可用。缺少必需 key 时直接跳过。
 - SSE 提供工具初始化、可用/不可用和研究开始事件；前端显示简短提示，不展示 MCP 异常堆栈。研究能否完成仍由证据覆盖情况决定，工具故障本身不强制 PARTIAL；无可用来源或覆盖不足则返回 PARTIAL。
 - 工具状态缓存在当前进程；修改 key 或修复服务后需重启后端重新连接。此次没有改动 ResearchNote / Evidence / Gap Review / Writer / Verifier 主链。

@@ -78,7 +78,7 @@ def test_public_initialization_progress_failure_fallback_and_cache(monkeypatch, 
         return result
     asyncio.run(scenario())
     asyncio.run(scenario())
-    assert calls == [{"brave-search", "tavily", "fetch", "paper-search"}]
+    assert calls == [{"tavily", "fetch", "paper-search"}]
     assert "pdfmux" not in calls[0] and "github" not in calls[0]
 
 

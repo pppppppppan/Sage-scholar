@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 import uuid
+import re
+import asyncio
+from sage_scholar.context.manager import request_context
+from sage_scholar.memory import MemoryInput
 
 from sage_scholar.domain import EvidenceRef
 from sage_scholar.domain.execution import ExecutionRequest
@@ -60,7 +64,9 @@ class QueryService:
         run_manager: RunManager,
         long_runners: dict[Workflow, LongTaskRunner],
         document_resolver: DocumentResolver | None = None,
+        memory_store=None,
     ):
+        self._memory_store = memory_store
         self._document_resolver = document_resolver
         self._router = router
         self._direct = direct
@@ -70,6 +76,11 @@ class QueryService:
 
     async def execute(self, command: QueryCommand) -> QueryResult:
         request_id = uuid.uuid4().hex
+        explicit_memory = re.fullmatch(r"(?:请)?记住[：:]\s*(.+)", command.query.strip(), re.S)
+        if self._memory_store and explicit_memory:
+            memory = await asyncio.to_thread(self._memory_store.add, MemoryInput(content=explicit_memory[1], confirmed=True))
+            return QueryResult(request_id=request_id, route=self._router.route(command.query, requested_workflow=Workflow.DIRECT),
+                               status=QueryStatus.INLINE, answer=f"已记住：{memory.content}。可在记忆管理中修改或删除。")
         document_ids = command.document_ids
         resolution_message = None
         # Explicit remote/conversation scope and Direct/Search choices retain their semantics.
@@ -103,11 +114,13 @@ class QueryService:
         )
 
         if route.workflow is Workflow.DIRECT:
-            answer = await self._direct.answer(execution)
+            with request_context(execution):
+                answer = await self._direct.answer(execution)
             return QueryResult(request_id=request_id, route=route, status=QueryStatus.INLINE, answer=answer)
 
         if route.workflow is Workflow.QA:
-            result = await self._qa.answer(execution)
+            with request_context(execution):
+                result = await self._qa.answer(execution)
             return QueryResult(
                 request_id=request_id,
                 route=route,

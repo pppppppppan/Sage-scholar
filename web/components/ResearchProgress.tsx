@@ -54,8 +54,10 @@ export interface ResearchStats {
 export default function ResearchProgress({
   runId,
   onReport,
+  terminalAfter = 0,
 }: {
   runId: string;
+  terminalAfter?: number;
   onReport: (report: string, stats: ResearchStats | null) => void;
 }) {
   const [nodes, setNodes] = useState<TimelineNode[]>([]);
@@ -79,6 +81,7 @@ export default function ResearchProgress({
   useEffect(() => {
     const abort = startRunEvents(runId, (event: ResearchEvent) => {
       switch (event.type) {
+        case "audit_started":
         case "initializing_tools":
           setInitialization({ message: event.message, ready: false, tools: {} });
           break;
@@ -88,6 +91,9 @@ export default function ResearchProgress({
             message: prev?.message || "正在初始化研究工具…", ready: false,
             tools: { ...prev?.tools, [event.server]: { available: event.type === "tool_available", message: event.message } },
           }));
+          break;
+        case "audit_claim_checked":
+          setInitialization((prev) => ({ message: `已核验 ${event.claim.claim_id}：${event.support_status}`, ready: true, tools: prev?.tools || {} }));
           break;
         case "research_started":
           setInitialization((prev) => ({ message: event.message, ready: true, tools: prev?.tools || {} }));
@@ -284,10 +290,10 @@ export default function ResearchProgress({
           setError(event.message);
           break;
       }
-    });
+    }, terminalAfter);
 
     return abort;
-  }, [runId]);
+  }, [runId, terminalAfter]);
 
   useEffect(() => {
     const container = bottomRef.current?.closest("[data-scroll-container]") as HTMLElement | null;

@@ -4,8 +4,9 @@ import threading
 
 
 class ResearchEvidenceContext:
-    def __init__(self, store, policy, documents=None):
+    def __init__(self, store, policy, documents=None, context_manager=None):
         self.store, self.policy, self.documents = store, policy, documents
+        self.context_manager = context_manager
         self._ids = set()
         self._lock = threading.Lock()
 
@@ -49,6 +50,10 @@ class ResearchEvidenceContext:
 
     def read(self, identities, *, max_chars=24000):
         """Bound context per call and disclose omitted portions rather than silently cut."""
+        if self.context_manager:
+            # Retain the legacy upper bound as a caller hint; allocation now uses tokens.
+            tokens = min(max_chars // 2, int(self.context_manager.max_tokens * 0.35))
+            return self.context_manager.read_evidence(self, identities, budget_tokens=tokens)
         records, remaining = [], max_chars
         for identity in dict.fromkeys(identities):
             item = self.get(identity)

@@ -76,7 +76,9 @@ class LLMClient:
         api_key: str = None,
         base_url: str = None,
         timeout: int = None,
+        context_manager=None,
     ):
+        self.context_manager = context_manager
         self.model = model or os.getenv("LLM_MODEL_ID")
         if not self.model:
             raise ValueError("未指定模型。请使用 --model 参数或在 .env 中设置 LLM_MODEL_ID")
@@ -126,6 +128,16 @@ class LLMClient:
         max_tokens: int = 4096,
         tag: str = "",
     ) -> ChatCompletionMessage:
+        if self.context_manager is None:
+            from sage_scholar.config import Config
+            from sage_scholar.context.manager import ContextManager
+            config = Config()
+            self.context_manager = ContextManager(config.data_dir, max_tokens=config.context.max_tokens,
+                                                  reserve_ratio=config.context.reserve_ratio)
+        prepared = self.context_manager.prepare(messages, tools=tools, tool_choice=tool_choice,
+                                                 output_reserve=max_tokens, include_memory=tag != "research:verify_claim")
+        messages = prepared.messages
+        logger.info("[Context:%s] %s", tag, prepared.accounting)
         if self._is_claude:
             return self._invoke_claude(
                 messages, temperature, tools, tool_choice, max_tokens, tag
@@ -285,6 +297,11 @@ class LLMClient:
         self.total_prompt_tokens += prompt_tokens
         self.total_completion_tokens += completion_tokens
         self.total_calls += 1
+        from sage_scholar.context.manager import CURRENT_REQUEST
+        request = CURRENT_REQUEST.get()
+        ledger = getattr(self.context_manager, "run_store", None)
+        if ledger and request and request.run_id:
+            ledger.record_usage(request.run_id, prompt_tokens, completion_tokens)
         total = prompt_tokens + completion_tokens
         label = f"[LLM:{tag}]" if tag else "[LLM]"
         logger.info(

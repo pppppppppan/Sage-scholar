@@ -18,3 +18,4 @@ fastapi>=0.115,<1
 uvicorn>=0.34,<1
 pytest>=9.0,<10
 httpx>=0.28,<1
+langgraph-checkpoint-sqlite>=3.1,<4

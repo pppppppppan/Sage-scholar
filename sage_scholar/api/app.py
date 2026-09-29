@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sage_scholar.base import setup_logging
 from sage_scholar.infrastructure.container import ApplicationContainer
 
-from .routes import queries, runs, library, evidence
+from .routes import queries, runs, library, evidence, audits, memory
 
 
 def create_app(container: ApplicationContainer | None = None) -> FastAPI:
@@ -16,6 +16,8 @@ def create_app(container: ApplicationContainer | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         setup_logging(enable_display=False)
         app.state.container = application_container
+        if hasattr(application_container.run_manager, "recover"):
+            await application_container.run_manager.recover()
         yield
         await application_container.close()
 
@@ -35,6 +37,8 @@ def create_app(container: ApplicationContainer | None = None) -> FastAPI:
     app.include_router(runs.router)
     app.include_router(library.router)
     app.include_router(evidence.router)
+    app.include_router(audits.router)
+    app.include_router(memory.router)
     return app
 
 

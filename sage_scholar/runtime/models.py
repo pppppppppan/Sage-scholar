@@ -14,7 +14,8 @@ def utc_now() -> datetime:
 
 
 class RunStatus(StrEnum):
-    CREATED = "created"
+    PENDING = "pending"
+    CREATED = "pending"
     RUNNING = "running"
     CANCEL_REQUESTED = "cancel_requested"
     CANCELLED = "cancelled"
@@ -42,6 +43,11 @@ class RunEvent(BaseModel):
 
 class RunSnapshot(BaseModel):
     run_id: str
+    schema_version: int = 4
+    checkpoint: dict = Field(default_factory=dict)
+    consumed_budget: dict = Field(default_factory=dict)
+    event_cursor: int = 0
+    restart_required: bool = False
     workflow: Workflow
     query: str
     status: RunStatus

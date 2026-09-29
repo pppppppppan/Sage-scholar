@@ -13,7 +13,7 @@ class QueryRouter:
     """
 
     _PAPER2CODE = re.compile(r"(实现|复现|写出|生成).{0,12}(论文|方法|算法|代码)|paper\s*2\s*code", re.I)
-    _CITATION = re.compile(r"(核验|检查|审计|验证).{0,12}(引用|参考文献|文献|结论)|虚假引用|错引")
+    _CITATION = re.compile(r"(核验|检查|审计|验证).{0,20}(引用|参考文献|文献|结论|报告|综述)|虚假引用|错引|是否.{0,6}支持|引用越界|部分支持结论")
     _RESEARCH = re.compile(r"调研|综述|研究现状|研究空白|主要方法|系统比较|横向比较|deep\s*research", re.I)
     _SEARCH = re.compile(r"最近|最新|新论文|查找|搜索|搜一下|有哪些论文")
     _QA = re.compile(r"这篇论文|该论文|文献库|知识库|上传的|pdf|论文中|哪一页|概括.{0,4}论文", re.I)

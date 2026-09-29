@@ -37,11 +37,11 @@ class DirectService:
                 ),
             }
         ]
-        for message in (history or [])[-12:]:
+        for message in (history or []):
             role = message.get("role")
             content = message.get("content", "").strip()
             if role in {"user", "assistant"} and content:
-                messages.append({"role": role, "content": content[:20_000]})
+                messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": query})
 
         return await self._model.complete(

@@ -103,3 +103,19 @@ test("SSE decoder forwards tool initialization progress across chunk boundaries"
     cancel();
   }
 });
+
+test("resumed SSE skips old terminal events but replays results and current completion", async (t) => {
+  const { startRunEvents } = await import(pathToFileURL(path.join(output, "api.mjs")));
+  const wire = [
+    [1, "run_interrupted", {}], [2, "run_resumed", {}],
+    [3, "write", { report: "resumed report" }], [4, "run_finished", { status: "completed" }],
+  ].map(([id, type, data]) => `id: ${id}\nevent: ${type}\ndata: ${JSON.stringify(data)}\n\n`).join("");
+  t.mock.method(globalThis, "fetch", async () => new Response(wire));
+  const received = [], done = Promise.withResolvers();
+  const timeout = setTimeout(() => done.reject(new Error("no completion")), 1000);
+  const cancel = startRunEvents("resumed", event => { received.push(event); if (event.type === "run_finished") done.resolve(); }, 2);
+  try {
+    await done.promise;
+    assert.deepEqual(received.map(e => e.type), ["run_resumed", "write", "run_finished"]);
+  } finally { clearTimeout(timeout); cancel(); }
+});

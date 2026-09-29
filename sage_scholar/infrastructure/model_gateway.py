@@ -10,8 +10,9 @@ from sage_scholar.config import Config
 class LegacyModelGateway:
     """Lazy adapter around the proven SAGE Research model client."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, context_manager=None):
         self._config = config
+        self.context_manager = context_manager
         self._client: LLMClient | None = None
         self._lock = threading.Lock()
 
@@ -23,6 +24,7 @@ class LegacyModelGateway:
                     self._client = LLMClient(
                         model=self._config.llm.model,
                         timeout=self._config.llm.timeout,
+                        context_manager=self.context_manager,
                     )
         return self._client
 

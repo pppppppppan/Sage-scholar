@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import Callable
 
 from .ports import EventEmitter
@@ -17,13 +18,21 @@ class ResearchService:
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
         sentinel = object()
+        stop = threading.Event()
+        def stopped():
+            return stop.is_set() or cancelled()
+        def enqueue(item):
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(queue.put_nowait, item)
 
         def produce() -> None:
             try:
                 runtime = self._runtime_provider.get(require_external=request.source_policy.permits_web)
                 usage_before = runtime.usage_snapshot()
-                for raw_event in runtime.run_research(request):
-                    if cancelled():
+                stream = (runtime.run_research(request, cancelled=stopped)
+                          if getattr(self._runtime_provider, "checkpoints", None) else runtime.run_research(request))
+                for raw_event in stream:
+                    if stopped():
                         break
                     events = (
                         runtime.to_public_events(raw_event) if hasattr(runtime, "to_public_events")
@@ -31,17 +40,17 @@ class ResearchService:
                     )
                     for event in events:
                         if event is not None:
-                            asyncio.run_coroutine_threadsafe(queue.put(event), loop).result()
+                            enqueue(event)
                 usage_after = runtime.usage_snapshot()
                 stats = {
                     key: max(0, value - usage_before.get(key, 0))
                     for key, value in usage_after.items()
                 }
-                asyncio.run_coroutine_threadsafe(queue.put(("stats", stats)), loop).result()
+                enqueue(("stats", stats))
             except Exception as exc:
-                asyncio.run_coroutine_threadsafe(queue.put(exc), loop).result()
+                enqueue(exc)
             finally:
-                asyncio.run_coroutine_threadsafe(queue.put(sentinel), loop).result()
+                enqueue(sentinel)
 
         producer = asyncio.create_task(asyncio.to_thread(produce))
         final_report: str | None = None
@@ -64,6 +73,10 @@ class ResearchService:
                 if event_type == "evidence":
                     evidence_ids = data.get("evidence_ids", [])
                 await emit(event_type, data)
+        except asyncio.CancelledError:
+            stop.set()
+            await asyncio.shield(producer)
+            raise
         finally:
             await producer
 
