@@ -1,3 +1,4 @@
+from sage_scholar.context.protection import prompt_contract
 import json
 import logging
 import re
@@ -55,9 +56,8 @@ class Researcher(AgentBase):
         self._tool_map = {tool.name: tool for tool in tool_list}
 
     def run(self, task, contract, dependency_notes=()) -> ResearchNote:
-        brief = task.objective + "\n契约：" + contract.model_dump_json()
-        if dependency_notes:
-            brief += "\n依赖任务笔记：" + json.dumps([note.model_dump() for note in dependency_notes], ensure_ascii=False)
+        brief = json.dumps({"objective": task.objective, "contract": prompt_contract(contract),
+                            "dependency_notes": [note.model_dump() for note in dependency_notes]}, ensure_ascii=False)
         raw, counts, exhausted = self._run_loop(brief)
         allowed_ids = set(self.observed_ids())
         allowed_ids.update(identity for note in dependency_notes for identity in note.evidence_ids)

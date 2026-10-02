@@ -134,17 +134,18 @@ class LLMClient:
             config = Config()
             self.context_manager = ContextManager(config.data_dir, max_tokens=config.context.max_tokens,
                                                   reserve_ratio=config.context.reserve_ratio)
+        if tool_choice is None:
+            tool_choice = "auto" if tools else None
         prepared = self.context_manager.prepare(messages, tools=tools, tool_choice=tool_choice,
-                                                 output_reserve=max_tokens, include_memory=tag != "research:verify_claim")
+                                                 output_reserve=max_tokens, include_memory=tag != "research:verify_claim",
+                                                 summarize=self.summarize_history, purpose=tag,
+                                                 summary_mode=tag == "context:compress")
         messages = prepared.messages
         logger.info("[Context:%s] %s", tag, prepared.accounting)
         if self._is_claude:
             return self._invoke_claude(
                 messages, temperature, tools, tool_choice, max_tokens, tag
             )
-
-        if tool_choice is None:
-            tool_choice = "auto" if tools else None
 
         start = time.time()
         response = self.client.chat.completions.create(
@@ -165,6 +166,16 @@ class LLMClient:
             elapsed, tag, msg,
         )
         return msg
+
+    def summarize_history(self, previous, batch, budget):
+        """Use this exact provider/client and its usage ledger; never recursively summarize itself."""
+        import json_repair
+        from sage_scholar.context.conversation import SUMMARY_INSTRUCTION
+        response = self.invoke([
+            {"role": "system", "content": SUMMARY_INSTRUCTION + f"输出最多 {budget} tokens。"},
+            {"role": "user", "content": json.dumps({"previous_summary": previous, "new_history": batch}, ensure_ascii=False)},
+        ], max_tokens=budget, tag="context:compress")
+        return json_repair.loads(response.content or "")
 
     # ---- Claude adapter ----
 

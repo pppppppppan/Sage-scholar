@@ -1,3 +1,4 @@
+from sage_scholar.context.protection import prompt_contract
 import json
 import json_repair
 import logging
@@ -293,7 +294,7 @@ class Supervisor(AgentBase):
 
     def plan_tasks(self, contract):
         from sage_scholar.domain.research import ResearchTask
-        questions = self.plan(contract.model_dump_json() + (
+        questions = self.plan(json.dumps(prompt_contract(contract), ensure_ascii=False) + (
             "\n以上契约中的 execution 是唯一资料约束，不得放宽。"
             "每个子任务提供稳定 task_id（T1、T2…）、dependencies（依赖任务 ID）及 dimensions。"
             "独立任务 dependencies=[] 以便并行；只有需要上游结果时声明依赖，不得循环。"

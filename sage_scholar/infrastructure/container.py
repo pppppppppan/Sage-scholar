@@ -57,8 +57,8 @@ class ApplicationContainer:
         self.query_service = QueryService(
             router=QueryRouter(),
             document_resolver=DocumentResolver(self.retrieval.documents),
-            direct=DirectService(self.model_gateway),
-            qa=QAService(self.retrieval, self.model_gateway),
+            direct=DirectService(self.model_gateway, context_manager=self.context_manager),
+            qa=QAService(self.retrieval, self.model_gateway, context_manager=self.context_manager),
             run_manager=self.run_manager,
             long_runners=self.runners,
             memory_store=self.memory_store,

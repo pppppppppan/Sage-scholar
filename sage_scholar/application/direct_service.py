@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from datetime import datetime
 import re
@@ -10,8 +11,9 @@ from sage_scholar.domain.execution import ExecutionRequest
 
 
 class DirectService:
-    def __init__(self, model: ModelGateway, clock: Callable[[ZoneInfo], datetime] | None = None):
+    def __init__(self, model: ModelGateway, clock: Callable[[ZoneInfo], datetime] | None = None, *, context_manager=None):
         self._model = model
+        self._context_manager = context_manager
         self._clock = clock or (lambda timezone: datetime.now(timezone))
 
     async def answer(
@@ -37,11 +39,17 @@ class DirectService:
                 ),
             }
         ]
-        for message in (history or []):
-            role = message.get("role")
-            content = message.get("content", "").strip()
-            if role in {"user", "assistant"} and content:
-                messages.append({"role": role, "content": content})
+        if self._context_manager:
+            bundle = await asyncio.to_thread(self._context_manager.conversation, request,
+                summarize=getattr(self._model, "summarize_history", None))
+            messages.extend(bundle.messages())
+        else:
+            # Compatibility with independently constructed gateways; provider boundary still budgets.
+            for message in (history or []):
+                role = message.get("role")
+                content = message.get("content", "").strip()
+                if role in {"user", "assistant"} and content:
+                    messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": query})
 
         return await self._model.complete(

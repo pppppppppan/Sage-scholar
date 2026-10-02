@@ -28,6 +28,9 @@ class LegacyModelGateway:
                     )
         return self._client
 
+    def summarize_history(self, previous, batch, budget):
+        return self.client.summarize_history(previous, batch, budget)
+
     async def complete(
         self,
         messages: list[dict[str, str]],

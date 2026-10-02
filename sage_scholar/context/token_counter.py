@@ -19,10 +19,10 @@ class TokenCounter:
         
         else:
             if isinstance(input_content, str):
-                token_ids = self.encoding.encode(input_content)
+                token_ids = self.encoding.encode(input_content, disallowed_special=())
 
             elif isinstance(input_content, list):
-                token_ids = self.encoding.encode("".join(msg.content or "" for msg in input_content))
+                token_ids = self.encoding.encode("".join(msg.content or "" for msg in input_content), disallowed_special=())
 
             return len(token_ids)
 
@@ -31,7 +31,7 @@ class TokenCounter:
             return text[:n*2]
         
         else:
-            token_ids = self.encoding.encode(text)
+            token_ids = self.encoding.encode(text, disallowed_special=())
             token_ids = token_ids[:n]
             trimmed_text = self.encoding.decode(token_ids)
 

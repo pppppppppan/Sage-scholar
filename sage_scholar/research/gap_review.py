@@ -1,3 +1,4 @@
+from sage_scholar.context.protection import prompt_contract
 import json
 
 from sage_scholar.domain.research import FollowUp, GapReview
@@ -18,7 +19,7 @@ class GapReviewer:
                     "可以用已有 task_id 重试，不得改变资料约束。只评价本次输入，不进行搜索。"
                 )},
                 {"role": "user", "content": json.dumps({
-                    "contract": contract.model_dump(),
+                    "contract": prompt_contract(contract),
                     "tasks": [task.model_dump() for task in tasks],
                     "notes": [note.model_dump() for note in notes],
                 }, ensure_ascii=False)},
