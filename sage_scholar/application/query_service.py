@@ -35,6 +35,7 @@ class QueryCommand:
     allow_web: bool | None = None
     timezone: str = "Asia/Shanghai"
     history: list[dict[str, str]] = field(default_factory=list)
+    workspace_id: str = "default"
     conversation_id: str | None = None
     session_id: str | None = None
     budget: dict = field(default_factory=dict)
@@ -78,7 +79,11 @@ class QueryService:
         request_id = uuid.uuid4().hex
         explicit_memory = re.fullmatch(r"(?:请)?记住[：:]\s*(.+)", command.query.strip(), re.S)
         if self._memory_store and explicit_memory:
-            memory = await asyncio.to_thread(self._memory_store.add, MemoryInput(content=explicit_memory[1], confirmed=True))
+            if hasattr(self._memory_store, "remember"):
+                memory = await asyncio.to_thread(self._memory_store.remember, explicit_memory[1],
+                    workspace_id=command.workspace_id, session_id=command.session_id or command.conversation_id)
+            else:
+                memory = await asyncio.to_thread(self._memory_store.add, MemoryInput(content=explicit_memory[1], confirmed=True))
             return QueryResult(request_id=request_id, route=self._router.route(command.query, requested_workflow=Workflow.DIRECT),
                                status=QueryStatus.INLINE, answer=f"已记住：{memory.content}。可在记忆管理中修改或删除。")
         document_ids = command.document_ids
@@ -108,7 +113,7 @@ class QueryService:
             **route.model_dump(include={
                 "workflow", "source_scope", "document_ids", "allow_web", "execution_mode",
             }),
-            query=command.query, request_id=request_id, timezone=command.timezone,
+            query=command.query, request_id=request_id, timezone=command.timezone, workspace_id=command.workspace_id,
             history=command.history, conversation_id=command.conversation_id,
             session_id=command.session_id, budget=command.budget, metadata=command.metadata,
         )

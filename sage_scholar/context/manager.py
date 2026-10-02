@@ -52,6 +52,11 @@ class ContextManager:
         self.run_store = None
 
     @staticmethod
+    def build_messages(system_prompt, history):
+        """Agent envelope only; prepare() remains the sole compression/budget boundary."""
+        return [{"role": "system", "content": system_prompt}, *[m.to_dict() for m in history]]
+
+    @staticmethod
     def owner(request):
         return (getattr(request, "run_id", None) or getattr(request, "session_id", None)
                 or getattr(request, "conversation_id", None) or getattr(request, "request_id", None) or "standalone")
@@ -194,11 +199,20 @@ class ContextManager:
                 result.insert(0, {"role": "system", "_context_kind": "fixed", "content":
                     PROTECTED_PREFIX + _json(pins)})
             if include_memory and self.memories and request:
-                records = self.memories.list(request.session_id)
-                if records:
+                records = self.memories.recall(request.query, workspace_id=request.workspace_id,
+                                               session_id=request.session_id, top_k=5)
+                # Small relevant background allocation, independent of the protected context budget.
+                selected, remaining = [], min(1600, self.max_tokens // 8)
+                for record in records:
+                    value = record.model_dump(mode="json", include={"memory_id", "content", "memory_type", "scope", "source", "version"})
+                    cost = self.counter.count(_json(value))
+                    if cost <= remaining:
+                        selected.append(value)
+                        remaining -= cost
+                if selected:
                     result.insert(1, {"role": "system", "_context_kind": "memory", "content":
-                        "以下是用户明确保存的偏好/笔记，仅作背景，当前指令优先。Memory 不是 Evidence，不得用于科研主张引用：\n"
-                        + _json([r.model_dump(mode="json") for r in records])})
+                        "以下是召回的用户已确认偏好/笔记，仅作背景，当前指令优先；会话要求优先于工作区和个人通用偏好。research_note 只是研究线索，不代表用户决策。Memory 不是 Evidence，不得用于科研主张引用：\n"
+                        + _json(selected)})
 
         # 1. Large observations first. Keep the entire call/result envelope and archive exact originals.
         seen = set()

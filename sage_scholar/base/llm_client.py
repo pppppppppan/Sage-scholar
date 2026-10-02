@@ -137,7 +137,7 @@ class LLMClient:
         if tool_choice is None:
             tool_choice = "auto" if tools else None
         prepared = self.context_manager.prepare(messages, tools=tools, tool_choice=tool_choice,
-                                                 output_reserve=max_tokens, include_memory=tag != "research:verify_claim",
+                                                 output_reserve=max_tokens, include_memory=tag != "research:verify_claim" and not tag.startswith("memory:"),
                                                  summarize=self.summarize_history, purpose=tag,
                                                  summary_mode=tag == "context:compress")
         messages = prepared.messages

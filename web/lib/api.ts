@@ -70,6 +70,7 @@ export async function submitQuery(
   query: string,
   history: ChatMessage[] = [],
   documentIds: string[] = [],
+  memoryContext: { workspace_id?: string; session_id?: string } = {},
 ): Promise<QueryResponse> {
   const response = await fetch(`${API_BASE}/api/queries`, {
     method: "POST",
@@ -79,6 +80,7 @@ export async function submitQuery(
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       history,
       document_ids: documentIds,
+      ...memoryContext,
     }),
   });
   return expectJson<QueryResponse>(response);
@@ -216,14 +218,31 @@ export function startRunEvents(
 export interface SavedMemory {
   memory_id: string;
   content: string;
-  type: "preference" | "note";
-  scope: "workspace" | "session";
+  memory_type: "preference" | "note" | "decision" | "background" | "research_note";
+  type: SavedMemory["memory_type"];
+  scope: "user" | "workspace" | "session";
+  workspace_id: string | null;
   session_id: string | null;
+  source: { kind: string; reference: string | null; quote: string };
+  status: "active" | "superseded" | "deleted";
+  importance: number;
+  confidence: number;
+  version: number;
+  supersedes: string[];
+  superseded_by: string | null;
   created_at: string;
   updated_at: string;
 }
 
+export interface MemoryCandidate extends Omit<SavedMemory, "memory_id" | "status"> {
+  candidate_id: string;
+  revision: number;
+  rationale: string;
+  proposal: { action: string; targets: string[]; reason: string };
+}
+
 export interface SavedRun {
+  execution?: { workspace_id: string; session_id: string | null };
   run_id: string;
   workflow: Workflow;
   query: string;
@@ -251,15 +270,33 @@ export async function auditReport(runId: string): Promise<SavedRun> {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ report_run_id: runId }),
   }))).run;
 }
-export async function listMemories(): Promise<SavedMemory[]> {
-  return expectJson(await fetch(`${API_BASE}/api/memories`));
+export async function listMemories(workspaceId = "default", sessionId?: string): Promise<SavedMemory[]> {
+  const params = new URLSearchParams({ workspace_id: workspaceId, include_inactive: "true" });
+  if (sessionId) params.set("session_id", sessionId);
+  return expectJson(await fetch(`${API_BASE}/api/memories?${params}`));
 }
-export async function saveMemory(content: string, type: SavedMemory["type"], memoryId?: string): Promise<SavedMemory> {
+export async function saveMemory(content: string, type: SavedMemory["type"], memoryId?: string,
+  scope: SavedMemory["scope"] = "workspace", workspaceId = "default", sessionId?: string): Promise<SavedMemory> {
   return expectJson(await fetch(`${API_BASE}/api/memories${memoryId ? `/${encodeURIComponent(memoryId)}` : ""}`, {
     method: memoryId ? "PUT" : "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, type, scope: "workspace", confirmed: true }),
+    body: JSON.stringify({ content, memory_type: type, scope, workspace_id: workspaceId, session_id: sessionId, confirmed: true }),
   }));
 }
 export async function deleteMemory(memoryId: string): Promise<void> {
   await expectJson(await fetch(`${API_BASE}/api/memories/${encodeURIComponent(memoryId)}`, { method: "DELETE" }));
+}
+export async function listMemoryCandidates(workspaceId: string, sessionId?: string): Promise<MemoryCandidate[]> {
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  if (sessionId) params.set("session_id", sessionId);
+  return expectJson(await fetch(`${API_BASE}/api/memories/candidates?${params}`));
+}
+export async function extractMemories(input: { messages?: ChatMessage[]; run_id?: string; workspace_id?: string; session_id?: string }): Promise<MemoryCandidate[]> {
+  return expectJson(await fetch(`${API_BASE}/api/memories/extract`, { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }));
+}
+export async function decideMemoryCandidate(id: string, accept: boolean, revision?: number): Promise<void> {
+  await expectJson(await fetch(`${API_BASE}/api/memories/candidates/${encodeURIComponent(id)}${accept ? "/approve" : ""}`, {
+    method: accept ? "POST" : "DELETE", headers: { "Content-Type": "application/json" },
+    ...(accept ? { body: JSON.stringify({ confirmed: true, revision }) } : {}),
+  }));
 }

@@ -8,7 +8,7 @@ from sage_scholar.research.structured import structured_response
 
 class Writer:
     """Compose structured claims, never infer identity from URL/Sources strings."""
-    def __init__(self, llm, context_builder=None, *, evidence_context, temperature=0, **kwargs):
+    def __init__(self, llm, *, evidence_context, temperature=0, **kwargs):
         self.llm, self.context = llm, evidence_context
         self.temperature = temperature
 

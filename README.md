@@ -1,6 +1,6 @@
 # SAGE Scholar
 
-SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。当前 V4.2 已支持 Direct、文档 QA、异步 Deep Research 与 Citation Audit，并统一上下文预算、显式 Memory 和可恢复 Run。统一查询接口先经过 Router，再按任务复杂度选择执行链。FastAPI 只处理协议，业务编排集中在 `QueryService`，长任务生命周期由 `RunManager` 管理，研究 Graph 只维护 workflow 内部状态。
+SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。当前 V4.3 已支持 Direct、文档 QA、异步 Deep Research 与 Citation Audit，并统一上下文预算、显式 Memory 和可恢复 Run。统一查询接口先经过 Router，再按任务复杂度选择执行链。FastAPI 只处理协议，业务编排集中在 `QueryService`，长任务生命周期由 `RunManager` 管理，研究 Graph 只维护 workflow 内部状态。
 
 ```mermaid
 flowchart LR
@@ -16,6 +16,18 @@ flowchart LR
     RM --> SSE[SSE Events]
     SSE --> UI
 ```
+
+## V4.3：长期记忆（2026-10-02）
+
+- `MemoryService` 管理 extraction → candidate → scope/dedup/conflict check → 用户确认 → active/superseded 版本关系。保留显式“记住：…”和 CRUD；不自动把所有聊天、助手推测或研究报告写成长记忆。
+- 记忆记录包含 memory_type、user/workspace/session scope、来源原话/任务、confidence/importance、时间、status、version 和 supersedes/superseded_by。旧 memory.json 读入默认工作区，首次写入原子升级；无需手动清库。
+- “任务与记忆”可从当前对话或已结束任务提取候选，查看出处与替换目标、确认/丢弃、查看历史版本。临时要求只能进入 session；研究输出仅作为 research_note 线索，不能覆盖项目决策。
+- Recall 先筛选有效版本和范围，再使用现有 Embedding/VectorStore cosine 能力，与词法相关性、importance/recency 组合排序；最多 5 条、最多 1600 tokens（且受 Context 总预算约束）。不再 list() 全量注入。向量文件仅为可重建缓存，模型改变后重建，embedding 故障明确日志降级为有限词法召回。
+- 合并候选使用现有 LLMClient 判断 new/merge/update/ignore。同义重复忽略；长期变更将旧记忆置 superseded。模型不能指定范围外目标，也不能自行改写用户确认的候选内容。范围快照/目标版本/候选版本检查阻止过期方案覆盖用户最新决定。
+- 新增查询字段 workspace_id，原 Run/Checkpoint 持久化模型沿用该字段；新对话更换 session。切换的是记忆工作区，不是文献数据库迁移。恢复读取当前有效且符合原 Run 范围的 Memory，不重建 Research workflow、不清零 Run 预算。
+- Context 只消费相关 Memory；当前指令优先。Memory 不是 Evidence，CitationVerifier 不接收 Memory；Writer 的事实仍须经过原 Evidence 核验。
+- 删除无实际职责的 ContextBuilder、HistoryCompactor 和旧 compact_prompts；V4.2 历史压缩保持原实现，没有增加第二套 Context 系统。
+- 借鉴 [GauzMem](https://github.com/fightheyyy/gauzmem) 的可追溯抽取、语义召回与时间/生命周期组织；没有引入它的 MySQL/Qdrant/Neo4j/Redis/MinIO 服务栈。无新增依赖。详见本地 [V4.3 说明](docs/v4.3-memory.md)。
 
 ## V4.2：统一 Context 与 QA 连续追问（2026-10-02）
 

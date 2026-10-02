@@ -93,11 +93,6 @@ def test_actual_react_loop_submits_typed_note(tmp_path):
     store = JsonEvidenceStore(str(tmp_path))
     context = ResearchEvidenceContext(store, contract().source_policy)
     tool = EvidenceTool(SourceReader(), store, context.register)
-    class History:
-        def compress_old_rounds(self, *args):
-            pass
-        def build_context(self, system_prompt, history):
-            return [{"role": "system", "content": system_prompt}] + [message.to_dict() for message in history]
     class Model(ScriptedLLM):
         def invoke(self, **kwargs):
             if kwargs["tag"].endswith(":react") and not context.ids():
@@ -110,7 +105,7 @@ def test_actual_react_loop_submits_typed_note(tmp_path):
         return {"findings": [{"text": "A scores 90", "evidence_ids": context.ids()}],
                 "evidence_ids": context.ids() + ["ev_fabricated"],
                 "unknowns": ["hardware unspecified"], "conflicts": ["other experiment differs"]}
-    researcher = Researcher("T1", Model("summary with source IDs", submit), History(), [tool],
+    researcher = Researcher("T1", Model("summary with source IDs", submit), [tool],
                             evidence_context=context, observed_ids=context.ids)
     note = researcher.run(ResearchTask(task_id="T1", objective="compare", revision=2), contract())
     assert isinstance(note, ResearchNote)

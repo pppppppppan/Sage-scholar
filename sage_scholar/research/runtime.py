@@ -22,7 +22,6 @@ from .gap_review import GapReviewer
 from .verification import CitationVerifier
 from sage_scholar.infrastructure.retrieval import LegacyRetrievalAdapter
 from sage_scholar.tools.policy import EvidenceTool
-from sage_scholar.context import ContextBuilder, HistoryCompactor, TokenCounter
 from sage_scholar.graph import build_graph
 from sage_scholar.library import LibraryManager
 from sage_scholar.mcp import create_mcp_clients, register_mcp_tools
@@ -41,14 +40,6 @@ class ResearchRuntime:
         self.config = config
         self.store, self.checkpoints, self.context_manager = store, checkpoints, context_manager
         self.llm_client = llm_client or LLMClient(model=config.llm.model, timeout=config.llm.timeout, context_manager=context_manager)
-        token_counter = TokenCounter()
-        history_compactor = HistoryCompactor(llm_client=self.llm_client, token_counter=token_counter)
-        self.context_builder = ContextBuilder(
-            history_compactor=history_compactor,
-            token_counter=token_counter,
-            reserve_ratio=config.context.reserve_ratio,
-            max_tokens=config.context.max_tokens,
-        )
         self.retrieval = retrieval or LegacyRetrievalAdapter(config, pipeline=pipeline)
         self.mcp_clients = []
         self.registry = ToolRegistry()
@@ -161,18 +152,18 @@ class ResearchRuntime:
             if self.config.llm.review_model else self.llm_client
         )
         supervisor = Supervisor(
-            llm=self.llm_client, context_builder=self.context_builder,
+            llm=self.llm_client,
             max_steps=contract.limits.max_steps, review_llm=review_llm,
         )
         writer = Writer(
-            llm=self.llm_client, context_builder=self.context_builder, evidence_context=context,
+            llm=self.llm_client, evidence_context=context,
             temperature=self.config.llm.writer_temperature,
         )
 
         def build_researcher(task_id, revision=0):
             observed_ids, issues = set(), []
             return Researcher(
-                name=task_id, llm=self.llm_client, context_builder=self.context_builder,
+                name=task_id, llm=self.llm_client,
                 tool_list=make_tools(f"{task_id}:{revision}", observed_ids, issues),
                 max_steps=contract.limits.max_steps, temperature=self.config.llm.research_temperature,
                 evidence_context=context, observed_ids=lambda: sorted(observed_ids),

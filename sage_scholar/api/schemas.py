@@ -22,6 +22,7 @@ class QueryRequest(BaseModel):
     document_ids: list[str] = Field(default_factory=list)
     allow_web: bool | None = None
     timezone: str = "Asia/Shanghai"
+    workspace_id: str = Field(default="default", min_length=1, max_length=200)
     conversation_id: str | None = None
     session_id: str | None = None
     budget: dict = Field(default_factory=dict)

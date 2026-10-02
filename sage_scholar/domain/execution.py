@@ -52,6 +52,7 @@ class ExecutionRequest(BaseModel):
     execution_mode: ExecutionMode
     run_id: str | None = None
     request_id: str | None = None
+    workspace_id: str = "default"
     conversation_id: str | None = None
     session_id: str | None = None
     budget: dict[str, Any] = Field(default_factory=dict)

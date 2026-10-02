@@ -27,6 +27,9 @@ interface ChatTurn {
 }
 
 export default function Home() {
+  const [workspaceId, setWorkspaceId] = useState("default");
+  const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
+  const [workspaceDraft, setWorkspaceDraft] = useState("default");
   const [selectedDocuments, setSelectedDocuments] = useState<LibraryDoc[]>([]);
   const [stage, setStage] = useState<Stage>("input");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -44,6 +47,10 @@ export default function Home() {
 
   function openSavedRun(saved: SavedRun) {
     sessionStorage.setItem("sage-active-run", saved.run_id);
+    if (saved.execution) {
+      setWorkspaceId(saved.execution.workspace_id); setWorkspaceDraft(saved.execution.workspace_id);
+      if (saved.execution.session_id) setSessionId(saved.execution.session_id);
+    }
     setRunId(saved.run_id); setActiveQuery(saved.query); setActiveTurnId(null);
     setRestoredRun(true); setStats(null);
     setStreamGeneration(value => value + 1);
@@ -99,7 +106,7 @@ export default function Home() {
 
     try {
       setRestoredRun(false); setTerminalAfter(0);
-      const response = await submitQuery(value, history, selectedDocuments.map((doc) => doc.document_id));
+      const response = await submitQuery(value, history, selectedDocuments.map((doc) => doc.document_id), { workspace_id: workspaceId, session_id: sessionId });
       if (response.status === "accepted" && response.run_id) {
         setTurns((previous) =>
           previous.map((turn) =>
@@ -158,6 +165,7 @@ export default function Home() {
 
   function handleNewConversation() {
     sessionStorage.removeItem("sage-active-run");
+    setSessionId(crypto.randomUUID());
     setRestoredRun(false);
     setExiting(true);
     setTimeout(() => {
@@ -178,7 +186,12 @@ export default function Home() {
 
   return (
     <>
-      <WorkspacePanel onRun={openSavedRun} />
+      <WorkspacePanel onRun={openSavedRun} messages={conversationHistory()} workspaceId={workspaceId} sessionId={sessionId} />
+      <div className="fixed left-5 bottom-5 z-40 flex gap-2 rounded-lg bg-surface border border-border p-2 text-xs">
+        <input aria-label="记忆工作区" className="w-28 bg-transparent" value={workspaceDraft} onChange={e => setWorkspaceDraft(e.target.value)} />
+        <button disabled={sending || stage === "researching" || !workspaceDraft.trim() || workspaceDraft.trim() === workspaceId}
+          onClick={() => { setWorkspaceId(workspaceDraft.trim()); handleNewConversation(); }}>切换工作区</button>
+      </div>
       <LibraryDrawer selectedDocuments={selectedDocuments} onSelectionChange={setSelectedDocuments} />
       {selectedDocuments.length > 0 && (
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-2 text-sm text-muted-foreground">

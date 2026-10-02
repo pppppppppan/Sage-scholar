@@ -1,37 +1,13 @@
-"""Explicit user memories; never stored in RAG or EvidenceStore."""
+"""Atomic memory/candidate lifecycle; vector files are disposable projections."""
 import json
 from pathlib import Path
-from typing import Literal
-from uuid import uuid4
-
-from pydantic import BaseModel, Field, model_validator
 from sage_scholar.domain.documents import utc_now
 from sage_scholar.infrastructure.json_store import file_lock, write_json
-from datetime import datetime
+from .models import MemoryInput, MemoryRecord, MemoryCandidate, visible, same_scope, scope_fingerprint
 
 
-class MemoryInput(BaseModel):
-    content: str = Field(min_length=1, max_length=8000)
-    type: Literal["preference", "note"] = "preference"
-    scope: Literal["workspace", "session"] = "workspace"
-    session_id: str | None = None
-    confirmed: bool = False
-
-    @model_validator(mode="after")
-    def validate_scope(self):
-        if not self.content.strip():
-            raise ValueError("记忆内容不能为空")
-        if self.scope == "session" and not self.session_id:
-            raise ValueError("session scope requires session_id")
-        if self.scope == "workspace":
-            self.session_id = None
-        return self
-
-
-class MemoryRecord(MemoryInput):
-    memory_id: str = Field(default_factory=lambda: "mem_" + uuid4().hex)
-    created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
+class MemoryConflict(ValueError):
+    pass
 
 
 class MemoryStore:
@@ -39,36 +15,160 @@ class MemoryStore:
         self.path = Path(data_dir) / "memory.json"
         self.lock = file_lock(self.path)
 
-    def list(self, session_id=None, *, all_scopes=False):
+    def _read(self):
+        raw = json.loads(self.path.read_text()) if self.path.exists() else []
+        if isinstance(raw, list):  # Lossless migration of V4 preferences; old workspace means default.
+            raw = {"revision": 0, "memories": [dict(r, source=r.get("source", {"kind": "legacy"})) for r in raw], "candidates": []}
+        return raw["revision"], [MemoryRecord.model_validate(r) for r in raw["memories"]], [MemoryCandidate.model_validate(c) for c in raw["candidates"]]
+
+    def _write(self, revision, items, candidates):
+        write_json(self.path, {"schema": 2, "revision": revision + 1,
+            "memories": [r.model_dump(mode="json") for r in items],
+            "candidates": [c.model_dump(mode="json") for c in candidates]})
+
+    def snapshot(self):
         with self.lock:
-            records = [MemoryRecord.model_validate(r) for r in json.loads(self.path.read_text())] if self.path.exists() else []
-        return [r for r in records if all_scopes or r.scope == "workspace" or r.session_id == session_id]
+            return self._read()
+
+    def list(self, session_id=None, *, workspace_id="default", all_scopes=False, include_inactive=False):
+        _, items, _ = self.snapshot()
+        return [r for r in items if (all_scopes or visible(r, workspace_id, session_id))
+                and r.status != "deleted" and (include_inactive or r.status == "active")]
+
+    def candidates(self, *, workspace_id="default", session_id=None):
+        return [c for c in self.snapshot()[2] if c.status == "pending" and visible(c, workspace_id, session_id)]
+
+    def save_candidate(self, value, expected_revision):
+        with self.lock:
+            revision, items, candidates = self._read()
+            if revision != expected_revision:
+                raise MemoryConflict("记忆已被修改，请重新检查候选冲突")
+            for previous in candidates:
+                if same_scope(previous, value) and previous.content == value.content and previous.source == value.source:
+                    if previous.status != "pending":
+                        return previous  # Accepted/rejected user decisions survive extraction retries.
+                    value.candidate_id = previous.candidate_id
+                    value.revision = previous.revision + 1
+                    candidates = [value if c.candidate_id == previous.candidate_id else c for c in candidates]
+                    self._write(revision, items, candidates)
+                    return value
+            if len([c for c in candidates if c.status == "pending" and same_scope(c, value)]) >= 100:
+                raise ValueError("候选记忆已达 100 条，请先确认或丢弃已有候选")
+            candidates.append(value)
+            self._write(revision, items, candidates)
+            return value
+
+    def reject(self, identity):
+        with self.lock:
+            revision, items, candidates = self._read()
+            candidate = next((c for c in candidates if c.candidate_id == identity), None)
+            if not candidate:
+                raise KeyError(identity)
+            if candidate.status != "pending":
+                raise MemoryConflict("候选已处理")
+            candidate.status = "rejected"
+            self._write(revision, items, candidates)
+
+    def commit(self, candidate, *, expected_revision=None, manual=False):
+        """One write commits candidate status and all temporal relations, with stale-plan checks."""
+        with self.lock:
+            revision, items, candidates = self._read()
+            stored = next((c for c in candidates if c.candidate_id == candidate.candidate_id), None)
+            if stored and stored.status == "accepted":
+                result = next((r for r in items if r.memory_id == stored.result_id and r.status == "active"), None)
+                if result:
+                    return result
+                raise MemoryConflict("候选的结果已变更，不能重新激活旧版本")
+            if stored and stored.status != "pending":
+                raise MemoryConflict("候选已被拒绝")
+            if expected_revision is not None and revision != expected_revision:
+                raise MemoryConflict("记忆已被修改，请重试")
+            if stored and stored.revision != candidate.revision:
+                raise MemoryConflict("候选方案已更新，请刷新后重新确认")
+            if candidate.scope_fingerprint != scope_fingerprint(items, candidate):
+                raise MemoryConflict("该范围的记忆已变化，请重新提取并确认合并方案")
+            targets = [r for r in items if r.memory_id in candidate.proposal.targets]
+            if len(targets) != len(candidate.proposal.targets):
+                raise MemoryConflict("目标记忆已不存在")
+            for target in targets:
+                if not same_scope(target, candidate) or target.status != "active" or target.version != candidate.target_versions.get(target.memory_id):
+                    raise MemoryConflict("候选关联的记忆已被修改/删除，请重新提取候选")
+            # A manual correction/deletion creates a barrier against pending automatic reintroductions.
+            if not manual and any(r.updated_at > candidate.created_at and same_scope(r, candidate)
+                                  and (r.manual_revision or r.status == "deleted") for r in items):
+                raise MemoryConflict("候选产生后已有手动修改，请重新提取确认")
+            action = candidate.proposal.action
+            if action == "ignore" and targets:
+                result = targets[0]
+            else:
+                result = MemoryRecord(
+                    content=candidate.content, memory_type=candidate.memory_type, scope=candidate.scope,
+                    workspace_id=candidate.workspace_id, session_id=candidate.session_id, confirmed=True,
+                    importance=candidate.importance, confidence=candidate.confidence, source=candidate.source,
+                    sources=[candidate.source], supersedes=[r.memory_id for r in targets],
+                    version=max([r.version for r in targets], default=0) + 1, manual_revision=manual,
+                )
+                for target in targets:
+                    target.status, target.superseded_by, target.updated_at = "superseded", result.memory_id, utc_now()
+                    result.sources.extend(target.sources or [target.source])
+                items.append(result)
+            if stored:
+                stored.status, stored.result_id = "accepted", result.memory_id
+            self._write(revision, items, candidates)
+            return result
 
     def add(self, value: MemoryInput):
         if not value.confirmed:
             raise ValueError("只保存用户明确要求或确认的记忆")
-        item = MemoryRecord(**value.model_dump())
+        # Service adds semantic consolidation. The storage primitive remains deterministic.
         with self.lock:
-            items = self.list(all_scopes=True)
+            revision, items, candidates = self._read()
+            duplicate = next((r for r in items if r.status == "active" and same_scope(r, value) and r.content == value.content), None)
+            if duplicate:
+                return duplicate
+            item = MemoryRecord(**value.model_dump())
             items.append(item)
-            write_json(self.path, [r.model_dump(mode="json") for r in items])
-        return item
+            self._write(revision, items, candidates)
+            return item
 
-    def update(self, identity, value: MemoryInput):
+    def update(self, identity, value: MemoryInput, *, expected_revision=None, supersede=()):
         if not value.confirmed:
             raise ValueError("修改记忆需要用户明确确认")
         with self.lock:
-            items = self.list(all_scopes=True)
-            old = next((r for r in items if r.memory_id == identity), None)
+            revision, items, candidates = self._read()
+            old = next((r for r in items if r.memory_id == identity and r.status == "active"), None)
             if not old:
                 raise KeyError(identity)
-            item = MemoryRecord(**value.model_dump(), memory_id=identity, created_at=old.created_at)
-            write_json(self.path, [item.model_dump(mode="json") if r.memory_id == identity else r.model_dump(mode="json") for r in items])
-            return item
+            if expected_revision is not None and revision != expected_revision:
+                raise MemoryConflict("记忆已变更，请重新修改")
+            other_targets = [r for r in items if r.memory_id in supersede and r.memory_id != identity]
+            if any(r.status != "active" or not same_scope(r, value) for r in other_targets):
+                raise MemoryConflict("不能覆盖其他范围或失效的记忆")
+            # Preserve API ID for manual edits; retain the prior version as an immutable predecessor.
+            archived = old.model_copy(deep=True, update={"memory_id": f"{identity}_v{old.version}",
+                "status": "superseded", "superseded_by": identity})
+            replacement = MemoryRecord(**value.model_dump(), memory_id=identity, created_at=old.created_at,
+                version=old.version + 1, supersedes=[archived.memory_id], manual_revision=True)
+            for previous in items:
+                if previous.superseded_by == identity:
+                    previous.superseded_by = archived.memory_id
+            for target in other_targets:
+                target.status, target.superseded_by, target.updated_at = "superseded", identity, utc_now()
+                replacement.supersedes.append(target.memory_id)
+            items = [replacement if r.memory_id == identity else r for r in items] + [archived]
+            self._write(revision, items, candidates)
+            return replacement
 
     def delete(self, identity):
         with self.lock:
-            items = self.list(all_scopes=True)
-            if not any(r.memory_id == identity for r in items):
+            revision, items, candidates = self._read()
+            item = next((r for r in items if r.memory_id == identity and r.status != "deleted"), None)
+            if not item:
                 raise KeyError(identity)
-            write_json(self.path, [r.model_dump(mode="json") for r in items if r.memory_id != identity])
+            item.status, item.manual_revision, item.updated_at = "deleted", True, utc_now()
+            self._write(revision, items, candidates)
+
+    def recall(self, query, *, workspace_id="default", session_id=None, top_k=5, **kwargs):
+        # Offline/standalone store users get bounded lexical recall, never list()->prompt.
+        from .recall import lexical_rank
+        return [r for r, _ in lexical_rank(query, self.list(session_id, workspace_id=workspace_id))[:max(0, min(5, top_k))]]

@@ -17,7 +17,7 @@ async def submit_query(body: QueryRequest, response: Response, container: Contai
                 allow_web=body.allow_web,
                 timezone=body.timezone,
                 history=[message.model_dump() for message in body.history],
-                conversation_id=body.conversation_id, session_id=body.session_id,
+                conversation_id=body.conversation_id, session_id=body.session_id, workspace_id=body.workspace_id,
                 budget=body.budget, metadata=body.metadata,
             )
         )

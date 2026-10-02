@@ -10,7 +10,6 @@ from sage_scholar.research.structured import structured_response
 from sage_scholar.research.notes import validate_note
 from sage_scholar.tools.base_tool import BaseTool
 from ..base import AgentBase, llm_client, Message
-from ..context import ContextBuilder
 
 
 
@@ -26,7 +25,6 @@ class Researcher(AgentBase):
         self,
         name: str,
         llm: llm_client,
-        context_builder: ContextBuilder,
         tool_list: list[BaseTool],
         max_steps: int = 3,
         system_prompt: str | None = None,
@@ -36,7 +34,7 @@ class Researcher(AgentBase):
         observed_ids=lambda: (),
         observed_issues=lambda: (),
     ):
-        super().__init__(name, llm, context_builder, system_prompt)
+        super().__init__(name, llm, system_prompt)
         self.system_prompt = system_prompt or (
             "你是科研调研员。围绕分配的子任务迭代使用可用工具、观察来源并总结发现。"
             "优先获取具体方法、数据、条件、单位与局限，按当前契约的范围行动。"
@@ -95,7 +93,6 @@ class Researcher(AgentBase):
         exhausted = True
         tool_call_counts = {}
         for i in range(self.max_steps):
-            self.context_builder.compress_old_rounds(self._history, sub_question, self.system_prompt)
             logger.info("[Researcher:%s] step %d/%d, history: %d 条消息", self.name, i + 1, self.max_steps, len(self._history))
             
             messages = self._build_messages(self.system_prompt)

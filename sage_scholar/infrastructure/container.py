@@ -13,7 +13,8 @@ from sage_scholar.runtime import RunManager
 from sage_scholar.runtime.store import RunStore
 from sage_scholar.runtime.checkpoints import Checkpoints
 from sage_scholar.context.manager import ContextManager
-from sage_scholar.memory import MemoryStore
+from sage_scholar.memory import MemoryStore, MemoryService, MemoryRecall
+from sage_scholar.rag.embedding import Embedding
 from sage_scholar.audit import CitationAuditService
 from sage_scholar.audit.fetch import AuditFetch
 
@@ -35,6 +36,11 @@ class ApplicationContainer:
         self.model_gateway = LegacyModelGateway(self.config)
         self.model_gateway.context_manager = self.context_manager
         self.retrieval = LegacyRetrievalAdapter(self.config)
+        self.memory_service = MemoryService(self.memory_store,
+            MemoryRecall(self.config.data_dir, embedding_factory=Embedding),
+            llm_factory=lambda: self.model_gateway.client)
+        self.context_manager.memories = self.memory_service
+
         self.evidence_store = self.retrieval.evidence_store
         self.run_manager = RunManager(max_concurrent_runs=1, store=self.run_store, checkpoints=self.checkpoints)
         self.runtime_provider = ResearchRuntimeProvider(
@@ -61,7 +67,7 @@ class ApplicationContainer:
             qa=QAService(self.retrieval, self.model_gateway, context_manager=self.context_manager),
             run_manager=self.run_manager,
             long_runners=self.runners,
-            memory_store=self.memory_store,
+            memory_store=self.memory_service,
         )
 
     async def close(self) -> None:

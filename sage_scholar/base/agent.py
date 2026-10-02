@@ -1,11 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
 
 from .message import Message
 from .llm_client import LLMClient as llm_client
-
-if TYPE_CHECKING:
-    from ..context.context_builder import ContextBuilder
 
 
 class AgentBase(ABC):
@@ -20,13 +16,11 @@ class AgentBase(ABC):
         self,
         name: str,
         llm: llm_client,
-        context_builder: ContextBuilder,
         system_prompt: str | None = None,
     ):
         self.name = name
         self.llm = llm
         self.system_prompt = system_prompt
-        self.context_builder = context_builder
 
         self._history: list[Message] = []
 
@@ -37,11 +31,8 @@ class AgentBase(ABC):
     def _build_messages(self, system_prompt: str | None = None) -> list[dict[str, str]]:
         prompt = system_prompt or self.system_prompt
 
-        messages = self.context_builder.build_context(
-            system_prompt=prompt, history=self._history
-        )
-
-        return messages
+        from sage_scholar.context.manager import ContextManager
+        return ContextManager.build_messages(prompt, self._history)
 
     def add_message(self, message: Message):
         self._history.append(message)
