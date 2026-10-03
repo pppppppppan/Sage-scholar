@@ -199,7 +199,8 @@ class ContextManager:
                 result.insert(0, {"role": "system", "_context_kind": "fixed", "content":
                     PROTECTED_PREFIX + _json(pins)})
             if include_memory and self.memories and request:
-                records = self.memories.recall(request.query, workspace_id=request.workspace_id,
+                from sage_scholar.memory.task_query import recall_query
+                records = self.memories.recall(recall_query(request, messages, purpose), workspace_id=request.workspace_id,
                                                session_id=request.session_id, top_k=5)
                 # Small relevant background allocation, independent of the protected context budget.
                 selected, remaining = [], min(1600, self.max_tokens // 8)
@@ -211,7 +212,7 @@ class ContextManager:
                         remaining -= cost
                 if selected:
                     result.insert(1, {"role": "system", "_context_kind": "memory", "content":
-                        "以下是召回的用户已确认偏好/笔记，仅作背景，当前指令优先；会话要求优先于工作区和个人通用偏好。research_note 只是研究线索，不代表用户决策。Memory 不是 Evidence，不得用于科研主张引用：\n"
+                        "以下是召回的有来源偏好/笔记，仅作背景，当前指令优先；会话要求优先于工作区和个人通用偏好。research_note 只是研究线索，不代表用户决策。Memory 不是 Evidence，不得用于科研主张引用：\n"
                         + _json(selected)})
 
         # 1. Large observations first. Keep the entire call/result envelope and archive exact originals.

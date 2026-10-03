@@ -146,3 +146,43 @@ def match_reference(reference, papers):
     if matches:
         return None, "存在多个符合元数据条件的不同文献身份，请补充 DOI/arXiv 或完整书目信息。"
     return None, "未找到题名及已提供作者、年份均匹配的记录，当前无法确认来源。"
+
+
+class AmbiguousLocalReference(ValueError):
+    pass
+
+
+def match_local_reference(reference, documents):
+    """Exact identifiers first, then exact normalized titles. Never fuzzy-select a document."""
+    matches = []
+    for doc in documents:
+        metadata = paper_metadata({**doc.metadata, "title": doc.title})
+        identifiers = [doc.source_identifier, str(doc.metadata.get("doi", "")),
+                       str(doc.metadata.get("DOI", "")), str(doc.metadata.get("arxiv_id", "")),
+                       str(doc.metadata.get("url", ""))]
+        dois = {doi_id(value) for value in identifiers} | {metadata["doi"]}
+        arxivs = {re.sub(r"v\d+$", "", value) for text in identifiers if (value := arxiv_id(text))}
+        if metadata["arxiv"]:
+            arxivs.add(re.sub(r"v\d+$", "", metadata["arxiv"]))
+        if reference.raw == doc.document_id:
+            matched = True
+        elif reference.doi:
+            matched = reference.doi in dois
+        elif reference.arxiv:
+            matched = re.sub(r"v\d+$", "", reference.arxiv) in arxivs
+        elif reference.url:
+            matched = reference.url in identifiers
+        else:
+            matched = bool(reference.title and normalize(reference.title) == normalize(doc.title))
+            # Missing metadata is unknown; present contradictory author/year rules a candidate out.
+            if reference.year and metadata["year"] and reference.year != metadata["year"]:
+                matched = False
+            if reference.authors and metadata["authors"]:
+                tokens = set(normalize(" ".join(metadata["authors"])).split())
+                if any(not set(normalize(author).split()) <= tokens for author in reference.authors):
+                    matched = False
+        if matched:
+            matches.append(doc)
+    if len(matches) > 1:
+        raise AmbiguousLocalReference("本地存在多个符合条件的来源（ambiguous），请指定 document_id 或 DOI/arXiv；不自动选择。")
+    return matches[0] if matches else None

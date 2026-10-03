@@ -1,7 +1,7 @@
 """Resolve citation identities first, then obtain authorized original-text Evidence."""
 from sage_scholar.research.evidence_context import ResearchEvidenceContext
 from sage_scholar.runtime.journal import WorkflowInterrupted
-from .bibliography import parse_reference, match_reference
+from .bibliography import parse_reference, match_reference, match_local_reference, AmbiguousLocalReference
 from .models import CitationIdentity
 
 
@@ -12,21 +12,15 @@ class AuditSources:
         self._sections = None
         self._resolved = {}
 
-    def _local(self, source):
+    def _local(self, reference):
         if not self.policy.permits_local:
-            return []
-        docs = self.retrieval.permitted_documents(self.policy)
-        ids = {d.document_id for d in docs if source in {
-            d.document_id, d.title, d.source_identifier, d.metadata.get("arxiv_id")} or
-            source in {parse_reference(value).locator for value in
-                       (d.source_identifier, d.metadata.get("arxiv_id")) if isinstance(value, str)}}
-        if len(ids) > 1:
-            raise ValueError("本地存在多个同名来源，请指定 document_id")
-        if not ids:
-            return []
+            return None, []
+        doc = match_local_reference(reference, self.retrieval.permitted_documents(self.policy))
+        if doc is None:
+            return None, []
         if self._sections is None:
             self._sections = self.retrieval.read_documents_sync(self.policy)
-        return [e for e in self._sections if e.document_id in ids]
+        return doc, [e for e in self._sections if e.document_id == doc.document_id]
 
     def resolve(self, citation, source):
         if source in self._resolved:
@@ -41,8 +35,14 @@ class AuditSources:
                 item = self.retrieval.evidence_store.get(source)
                 items = [item] if item else []
             else:
-                items = self._local(source)
-                if not items and self.policy.permits_web:
+                doc, items = self._local(reference)
+                if doc:
+                    matched = True
+                    source = doc.document_id
+                    metadata = {"document_id": doc.document_id, "title": doc.title,
+                                "resolution": "local_exact"}
+                    reason = "已通过本地标识或规范化精确题名匹配；已有作者/年份元数据无冲突。"
+                if not matched and not items and self.policy.permits_web:
                     if (not reference.locator and not source.startswith("doc_")
                             and any(c.isalpha() for c in reference.title)
                             and self.fetch and hasattr(self.fetch, "search")):
@@ -66,6 +66,9 @@ class AuditSources:
             result = CitationIdentity(citation=citation, source=original,
                 status="source_found" if valid or matched else "source_not_found", evidence_ids=valid,
                 resolved_source=source if valid or matched else None, metadata=metadata or {}, reason=reason)
+        except AmbiguousLocalReference as exc:
+            result = CitationIdentity(citation=citation, source=original, status="source_not_found",
+                metadata={"resolution": "ambiguous"}, reason=str(exc) + " 当前无法确认来源，不等于伪造。")
         except WorkflowInterrupted:
             raise
         except Exception as exc:

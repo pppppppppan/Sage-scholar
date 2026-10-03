@@ -6,7 +6,6 @@ import pytest
 from fastapi.testclient import TestClient
 from research_fakes import ScriptedLLM, contract
 from sage_scholar.memory import MemoryInput, MemoryStore, MemoryService, MemoryRecall
-from sage_scholar.memory.store import MemoryConflict
 from sage_scholar.context.manager import ContextManager
 
 
@@ -76,33 +75,20 @@ def test_scope_filter_precedes_embedding_and_user_scope_is_shared(tmp_path):
     assert session.memory_id not in {r.memory_id for r in service.recall("架构", workspace_id="a", session_id="s2")}
 
 
-def test_extraction_only_creates_grounded_reviewable_candidates(tmp_path):
+def test_extraction_automatically_saves_only_grounded_durable_content(tmp_path):
     content = "SAGE Scholar 不考虑多用户架构"
     store, service, _ = memory(tmp_path, {"candidates": [
         extraction(content),
         extraction("用户喜欢 Transformer", quote="我猜他喜欢 Transformer", message_index=1, memory_type="preference", scope="user"),
         extraction("模型编造的背景", quote="不存在的原话"),
+        extraction("这轮只比较三篇论文", message_index=2, scope="user"),
     ]})
     result = service.extract([{"role": "user", "content": content},
-                              {"role": "assistant", "content": "我猜他喜欢 Transformer"}], workspace_id="sage", session_id="s1")
-    assert len(result) == 1 and store.list(all_scopes=True) == []
-    with pytest.raises(ValueError):
-        service.approve(result[0].candidate_id)
-    approved = service.approve(result[0].candidate_id, confirmed=True)
-    assert approved.scope == "workspace" and approved.workspace_id == "sage"
-    assert approved.source.quote == content
-    assert service.approve(result[0].candidate_id, confirmed=True).memory_id == approved.memory_id
-
-
-def test_temporary_user_content_never_promotes_to_global(tmp_path):
-    text = "这轮只比较这三篇论文"
-    _, service, _ = memory(tmp_path, {"candidates": [extraction(text, scope="user")]})
-    candidates = service.extract([{"role": "user", "content": text}], workspace_id="a", session_id="s1")
-    assert candidates[0].scope == "session"
-    saved = service.approve(candidates[0].candidate_id, confirmed=True)
-    assert saved.session_id == "s1" and not service.recall("论文", workspace_id="a", session_id="s2")
-    with pytest.raises(ValueError):
-        service.add(value(text, scope="user"))
+        {"role": "assistant", "content": "我猜他喜欢 Transformer"},
+        {"role": "user", "content": "这轮只比较三篇论文"}], workspace_id="sage", session_id="s1")
+    assert len(result) == len(store.list(all_scopes=True)) == 1
+    assert result[0].source.quote == content and result[0].workspace_id == "sage"
+    assert service.candidates(workspace_id="sage") == []
 
 
 @pytest.mark.parametrize("action", ["ignore", "merge", "update"])
@@ -123,20 +109,17 @@ def test_semantic_consolidation_and_temporal_links(tmp_path, action):
         assert [r.memory_id for r in service.recall("微调")] == [new.memory_id]
 
 
-def test_stale_candidate_cannot_override_manual_edit_or_deletion(tmp_path):
+def test_background_extraction_cannot_override_new_manual_edit(tmp_path):
+    from sage_scholar.domain.documents import utc_now
     store, service, llm = memory(tmp_path)
     old = store.add(value("不考虑微调"))
+    started = utc_now()
+    store.update(old.memory_id, value("手动修改：只比较 LoRA"))
     text = "以后考虑微调"
     llm.responses = iter([{"candidates": [extraction(text)]},
                           {"action": "update", "targets": [old.memory_id], "reason": "later decision"}])
-    candidate = service.extract([{"role": "user", "content": text}])[0]
-    store.update(old.memory_id, value("手动修改：只比较 LoRA"))
-    with pytest.raises(MemoryConflict):
-        service.approve(candidate.candidate_id, confirmed=True)
-    service.delete(old.memory_id)
-    with pytest.raises(MemoryConflict):
-        service.approve(candidate.candidate_id, confirmed=True)
-    assert not service.recall("微调")
+    assert service.extract([{"role": "user", "content": text}], started_at=started) == []
+    assert store.list()[0].content == "手动修改：只比较 LoRA"
 
 
 def test_manual_update_preserves_versions_and_resolves_other_active_conflicts(tmp_path):
@@ -173,7 +156,7 @@ def test_restart_and_legacy_migration_preserve_scope_source_history(tmp_path):
     assert json.loads((tmp_path / "memory.json").read_text())["schema"] == 2
 
 
-def test_memory_http_candidate_lifecycle_and_scope(tmp_path):
+def test_memory_http_automatic_writes_and_scope(tmp_path):
     from sage_scholar.api.app import create_app
     text = "以后本项目考虑微调"
     store, service, _ = memory(tmp_path, {"candidates": [extraction(text)]})
@@ -184,32 +167,14 @@ def test_memory_http_candidate_lifecycle_and_scope(tmp_path):
         response = client.post("/api/memories/extract", json={"workspace_id": "sage", "session_id": "s1",
             "messages": [{"role": "user", "content": text}]})
         assert response.status_code == 200
-        identity = response.json()[0]["candidate_id"]
-        assert client.get("/api/memories/candidates?workspace_id=other").json() == []
-        assert client.post(f"/api/memories/candidates/{identity}/approve", json={"confirmed": False}).status_code == 400
-        saved = client.post(f"/api/memories/candidates/{identity}/approve", json={"confirmed": True}).json()
+        saved = response.json()[0]
         assert saved["status"] == "active" and saved["source"]["quote"] == text
         assert client.get("/api/memories").json() == []
         assert len(client.get("/api/memories?workspace_id=sage").json()) == 1
         assert client.delete(f"/api/memories/{saved['memory_id']}").status_code == 200
         assert client.get("/api/memories?workspace_id=sage").json() == []
-
-
-def test_two_pending_conflicting_candidates_cannot_both_become_active(tmp_path):
-    store, service, llm = memory(tmp_path, {"candidates": [extraction("不考虑微调"), extraction("以后考虑微调", message_index=1)]})
-    candidates = service.extract([{"role": "user", "content": "不考虑微调"}, {"role": "user", "content": "以后考虑微调"}])
-    saved = service.approve(candidates[0].candidate_id, confirmed=True)
-    with pytest.raises(MemoryConflict):
-        service.approve(candidates[1].candidate_id, confirmed=True)
-    assert len(store.list()) == 1
-    llm.responses = iter([{"candidates": [extraction("以后考虑微调", message_index=1)]},
-                          {"action": "update", "targets": [saved.memory_id], "reason": "后续长期变更"}])
-    replanned = service.extract([{"role": "user", "content": "不考虑微调"}, {"role": "user", "content": "以后考虑微调"}])[0]
-    assert replanned.candidate_id == candidates[1].candidate_id and replanned.revision == 2
-    with pytest.raises(MemoryConflict):
-        service.approve(replanned.candidate_id, confirmed=True, revision=1)
-    updated = service.approve(replanned.candidate_id, confirmed=True, revision=2)
-    assert store.list()[0].memory_id == updated.memory_id and saved.memory_id in updated.supersedes
+        # Explicit CRUD no longer depends on a confirmation flag either.
+        assert client.post("/api/memories", json={"content": "简洁回答", "scope": "user"}).status_code == 200
 
 
 def test_embedding_model_change_rebuilds_projection_after_restart(tmp_path):
@@ -240,7 +205,6 @@ def test_research_lead_cannot_supersede_a_user_project_decision(tmp_path):
     old = store.add(value("项目不考虑微调", memory_type="decision"))
     text = "报告建议使用微调"
     llm.responses = iter([{"candidates": [extraction(text, message_index=1, memory_type="research_note")]}])
-    candidate = service.extract([{"role": "user", "content": "比较方法"}, {"role": "assistant", "content": text}], research=True)[0]
-    assert candidate.proposal.action == "new" and not candidate.proposal.targets
-    service.approve(candidate.candidate_id, confirmed=True)
+    candidate = service.extract([{"role": "user", "content": "比较方法"}, {"role": "assistant", "content": text, "evidence_ids": ["ev_test"]}], research=True)[0]
+    assert candidate.status == "active" and not candidate.supersedes
     assert next(r for r in store.list() if r.memory_id == old.memory_id).status == "active"

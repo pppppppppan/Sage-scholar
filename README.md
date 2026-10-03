@@ -1,6 +1,6 @@
 # SAGE Scholar
 
-SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。当前 V4.3 已支持 Direct、文档 QA、异步 Deep Research 与 Citation Audit，并统一上下文预算、显式 Memory 和可恢复 Run。统一查询接口先经过 Router，再按任务复杂度选择执行链。FastAPI 只处理协议，业务编排集中在 `QueryService`，长任务生命周期由 `RunManager` 管理，研究 Graph 只维护 workflow 内部状态。
+SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。当前 V4.4 已支持 Direct、文档 QA、异步 Deep Research 与 Citation Audit，并统一上下文预算、自动长期 Memory 和可恢复 Run。统一查询接口先经过 Router，再按任务复杂度选择执行链。FastAPI 只处理协议，业务编排集中在 `QueryService`，长任务生命周期由 `RunManager` 管理，研究 Graph 只维护 workflow 内部状态。
 
 ```mermaid
 flowchart LR
@@ -17,17 +17,17 @@ flowchart LR
     SSE --> UI
 ```
 
-## V4.3：长期记忆（2026-10-02）
+## V4.4：自动长期记忆与本地引用身份核验（2026-10-03）
 
-- `MemoryService` 管理 extraction → candidate → scope/dedup/conflict check → 用户确认 → active/superseded 版本关系。保留显式“记住：…”和 CRUD；不自动把所有聊天、助手推测或研究报告写成长记忆。
-- 记忆记录包含 memory_type、user/workspace/session scope、来源原话/任务、confidence/importance、时间、status、version 和 supersedes/superseded_by。旧 memory.json 读入默认工作区，首次写入原子升级；无需手动清库。
-- “任务与记忆”可从当前对话或已结束任务提取候选，查看出处与替换目标、确认/丢弃、查看历史版本。临时要求只能进入 session；研究输出仅作为 research_note 线索，不能覆盖项目决策。
-- Recall 先筛选有效版本和范围，再使用现有 Embedding/VectorStore cosine 能力，与词法相关性、importance/recency 组合排序；最多 5 条、最多 1600 tokens（且受 Context 总预算约束）。不再 list() 全量注入。向量文件仅为可重建缓存，模型改变后重建，embedding 故障明确日志降级为有限词法召回。
-- 合并候选使用现有 LLMClient 判断 new/merge/update/ignore。同义重复忽略；长期变更将旧记忆置 superseded。模型不能指定范围外目标，也不能自行改写用户确认的候选内容。范围快照/目标版本/候选版本检查阻止过期方案覆盖用户最新决定。
-- 新增查询字段 workspace_id，原 Run/Checkpoint 持久化模型沿用该字段；新对话更换 session。切换的是记忆工作区，不是文献数据库迁移。恢复读取当前有效且符合原 Run 范围的 Memory，不重建 Research workflow、不清零 Run 预算。
-- Context 只消费相关 Memory；当前指令优先。Memory 不是 Evidence，CitationVerifier 不接收 Memory；Writer 的事实仍须经过原 Evidence 核验。
-- 删除无实际职责的 ContextBuilder、HistoryCompactor 和旧 compact_prompts；V4.2 历史压缩保持原实现，没有增加第二套 Context 系统。
-- 借鉴 [GauzMem](https://github.com/fightheyyy/gauzmem) 的可追溯抽取、语义召回与时间/生命周期组织；没有引入它的 MySQL/Qdrant/Neo4j/Redis/MinIO 服务栈。无新增依赖。详见本地 [V4.3 说明](docs/v4.3-memory.md)。
+- Direct / QA 正常完成，以及 Deep Research completed/partial 后，进入有界 asyncio 后台队列抽取记忆；失败只记日志，不改变主响应或 Run 结果。无需用户确认。
+- Memory Policy 仅接受有原句依据的稳定偏好、项目决策、长期背景和研究线索；低置信度、临时要求、助手猜测、无原文依据的结果跳过。保存完整原句，避免模型改写产生额外事实。临时请求继续由 Context/Run state 管理；显式 CRUD 仍可保存 session 笔记。
+- 复用既有 scope、语义去重与 new/merge/update/ignore；长期冲突替换旧 active 版本并保留 superseded 历史，自动抽取不能复活已删除记忆。手动修改/删除优先，过期后台写入跳过。
+- Recall 结合原问题、当前任务 objective、契约维度和调用用途。按 workspace/session、查询、持久化 revision 缓存至多 256 组 ID/version，重复调用不重复 query embedding；记忆变更自然失效。仍最多注入 5 条相关有效记忆。
+- 研究线索仅从服务端 ResearchNote finding / final Claim 取原句，关联经过 SourcePolicy 和原文可读性检查的 evidence_ids。Memory 不是 Evidence；Writer/Verifier 必须回到原文核验。
+- 面板支持查看、修改、删除、历史版本、来源和 Evidence ID；自动入库不再有确认候选 UI。旧 confirmed 字段与候选 API 仅为 deprecated 兼容，不作为写入门槛。
+- Citation Audit 在允许的本地文档中先匹配 DOI/arXiv/document_id，再规范化精确题名；已有作者/年份用于排除冲突，缺失不伪装成已核验。多文档同名返回 ambiguous + uncertain，不选第一条；允许联网且本地未找到时才使用现有 paper-search。source_not_found 不等于 fabricated。
+- 沿用 [GauzMem](https://github.com/fightheyyy/gauzmem) 的可追溯抽取、consolidation、语义召回与时间生命周期思路；不引入新依赖、分布式服务或第二套 Context/Recovery。
+- 后台抽取是 best-effort：进程终止或队列满可能跳过；已写入记忆持久保存，可在面板重新整理对话/研究。没有将 Memory 后处理伪装成新的 durable workflow。
 
 ## V4.2：统一 Context 与 QA 连续追问（2026-10-02）
 
@@ -55,7 +55,7 @@ flowchart LR
 
 - Citation Audit 复用 V3 Claim / Evidence / CitationVerifier，区分来源未找到和主张不支持；支持报告正文、Claim + Citation、已有报告 Run。前端报告旁新增“核验这份报告的引用”。
 - 每次 LLM 调用统一计算 system、prompt、history、工具 schema、笔记/证据、Memory 和输出预留；大工具结果外置，可按 ID 回读，保留 SourcePolicy、用户限制、冲突/未知及工具配对。
-- 仅显式“记住：…”或在“任务与记忆”面板确认的内容进入 Memory；支持增删改查，当前指令优先，Memory 不进入 Evidence/RAG。
+- Memory 支持增删改查，V4.4 已升级为有依据的自动抽取入库；当前指令优先，Memory 不进入 Evidence/RAG。
 - `data/runtime.sqlite3` 持久化 Run、事件、预算、工具结果及 ResearchNote；`data/checkpoints.sqlite3` 使用 LangGraph 官方 SQLite saver 保存图状态。SSE 先落库再发送。
 - 重启时有兼容 checkpoint 且无未知工具调用的任务继续原 Run；否则标记 interrupted/restart_required。刷新和 SSE 重连只查询/重放，不创建新任务。
 - 新依赖：`langgraph-checkpoint-sqlite>=3.1,<4`。更新后先 `python -m pip install -r requirements.txt`，再重启后端；沿用原启动命令。
@@ -122,7 +122,7 @@ sage-scholar/
 │   ├── graph/            # LangGraph workflow
 │   ├── rag/              # hybrid retrieval
 │   ├── audit/            # Claim/source 解析与复用 CitationVerifier 的 AuditGraph
-│   ├── memory/           # 用户显式确认的偏好/笔记 CRUD
+│   ├── memory/           # 自动长期记忆、召回与用户管理
 │   ├── context/          # 完整请求预算、保护信息、artifact 外置与回读
 │   ├── tools/            # 统一工具基础接口与 registry
 │   ├── library/          # 文档转换和文档库

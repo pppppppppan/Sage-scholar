@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from sage_scholar.application.ports import LongTaskRunner
 import uuid
+import logging
+
+logger = logging.getLogger(__name__)
 
 from sage_scholar.context.manager import request_context
 from sage_scholar.domain.execution import ExecutionRequest
@@ -26,8 +29,9 @@ class _RunState:
 
 class RunManager:
     """Durable lifecycle and SSE; never tracks a graph's current/next node."""
-    def __init__(self, max_concurrent_runs=2, *, store=None, checkpoints=None):
+    def __init__(self, max_concurrent_runs=2, *, store=None, checkpoints=None, on_completed=None):
         self.store, self.checkpoints = store, checkpoints
+        self.on_completed = on_completed
         self._runs = {snapshot.run_id: _RunState(snapshot, events) for snapshot, events in store.load()} if store else {}
         self._tasks: dict[str, asyncio.Task] = {}
         self._semaphore = asyncio.Semaphore(max_concurrent_runs)
@@ -192,6 +196,11 @@ class RunManager:
                 self._set_status(state, RunStatus(outcome.status))
                 await self._append_event(state, "run_finished", {"status": outcome.status, "reason": outcome.reason,
                                                                 "remaining_gaps": outcome.remaining_gaps})
+                if self.on_completed:
+                    try:
+                        self.on_completed(state.snapshot.model_copy(deep=True), tuple(state.events))
+                    except Exception:
+                        logger.exception("Post-run memory scheduling failed; Run result retained")
         except (asyncio.CancelledError, WorkflowInterrupted) as exc:
             status = RunStatus.CANCELLED if state.cancel_requested else RunStatus.INTERRUPTED
             self._set_status(state, status)

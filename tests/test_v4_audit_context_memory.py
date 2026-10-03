@@ -34,7 +34,6 @@ def test_audit_reuses_verifier_with_joint_evidence(tmp_path, status):
 
 def test_memory_explicit_crud_and_context_protection(tmp_path):
     memories = MemoryStore(str(tmp_path))
-    with pytest.raises(ValueError): memories.add(MemoryInput(content="推测用户偏好"))
     saved = memories.add(MemoryInput(content="不考虑微调；FNO 更好", confirmed=True))
     memories.update(saved.memory_id, MemoryInput(content="不考虑微调", confirmed=True))
     manager = ContextManager(str(tmp_path), max_tokens=6000, memories=memories)
@@ -109,7 +108,6 @@ def test_audit_and_memory_http_paths_share_existing_evidence_and_replay(tmp_path
     container = SimpleNamespace(run_manager=manager, audit_service=service,
         memory_store=MemoryStore(str(tmp_path)), close=close)
     with TestClient(create_app(container)) as client:
-        assert client.post("/api/memories", json={"content": "inferred preference"}).status_code == 400
         record = client.post("/api/memories", json={"content": "不考虑微调", "confirmed": True}).json()
         assert client.get("/api/memories").json()[0]["memory_id"] == record["memory_id"]
         assert client.put("/api/memories/" + record["memory_id"], json={"content": "可以比较微调", "confirmed": True}).json()["content"] == "可以比较微调"

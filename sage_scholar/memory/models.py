@@ -25,7 +25,7 @@ class MemoryInput(BaseModel):
     scope: Scope = "workspace"
     workspace_id: str | None = "default"
     session_id: str | None = None
-    confirmed: bool = False
+    confirmed: bool = Field(default=False, deprecated=True, description="Deprecated compatibility field; never gates writes")
     importance: float = Field(default=0.6, ge=0, le=1)
 
     @computed_field
@@ -67,7 +67,7 @@ class Consolidation(BaseModel):
     action: Literal["new", "merge", "update", "ignore"] = "new"
     targets: list[str] = Field(default_factory=list, max_length=8)
     reason: str = ""
-    # No model-written replacement text: the new version always uses user-reviewed content.
+    # No model-written replacement text: the new version always uses grounded source content.
 
 
 class MemoryCandidate(MemoryInput):

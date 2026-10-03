@@ -118,8 +118,6 @@ class MemoryStore:
             return result
 
     def add(self, value: MemoryInput):
-        if not value.confirmed:
-            raise ValueError("只保存用户明确要求或确认的记忆")
         # Service adds semantic consolidation. The storage primitive remains deterministic.
         with self.lock:
             revision, items, candidates = self._read()
@@ -132,8 +130,6 @@ class MemoryStore:
             return item
 
     def update(self, identity, value: MemoryInput, *, expected_revision=None, supersede=()):
-        if not value.confirmed:
-            raise ValueError("修改记忆需要用户明确确认")
         with self.lock:
             revision, items, candidates = self._read()
             old = next((r for r in items if r.memory_id == identity and r.status == "active"), None)

@@ -10,6 +10,7 @@ from sage_scholar.memory import MemoryInput
 
 from sage_scholar.domain import EvidenceRef
 from sage_scholar.domain.execution import ExecutionRequest
+from sage_scholar.domain.documents import utc_now
 from sage_scholar.routing import QueryRouter, RouteDecision, SourceScope, Workflow
 from sage_scholar.runtime import RunManager
 
@@ -66,8 +67,10 @@ class QueryService:
         long_runners: dict[Workflow, LongTaskRunner],
         document_resolver: DocumentResolver | None = None,
         memory_store=None,
+        memory_background=None,
     ):
         self._memory_store = memory_store
+        self._memory_background = memory_background
         self._document_resolver = document_resolver
         self._router = router
         self._direct = direct
@@ -76,6 +79,7 @@ class QueryService:
         self._long_runners = long_runners
 
     async def execute(self, command: QueryCommand) -> QueryResult:
+        started_at = utc_now()
         request_id = uuid.uuid4().hex
         explicit_memory = re.fullmatch(r"(?:请)?记住[：:]\s*(.+)", command.query.strip(), re.S)
         if self._memory_store and explicit_memory:
@@ -121,11 +125,15 @@ class QueryService:
         if route.workflow is Workflow.DIRECT:
             with request_context(execution):
                 answer = await self._direct.answer(execution)
+            if self._memory_background:
+                self._memory_background.conversation(execution, answer, started_at=started_at)
             return QueryResult(request_id=request_id, route=route, status=QueryStatus.INLINE, answer=answer)
 
         if route.workflow is Workflow.QA:
             with request_context(execution):
                 result = await self._qa.answer(execution)
+            if self._memory_background:
+                self._memory_background.conversation(execution, result.answer, started_at=started_at)
             return QueryResult(
                 request_id=request_id,
                 route=route,

@@ -1,5 +1,5 @@
 import asyncio
-import json
+from sage_scholar.memory.background import research_messages
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, model_validator
 from sage_scholar.memory import MemoryInput
@@ -53,7 +53,7 @@ class ExtractRequest(BaseModel):
 
 
 class Approval(BaseModel):
-    confirmed: bool = False
+    confirmed: bool = Field(default=False, deprecated=True)
     revision: int | None = None
 
 
@@ -66,26 +66,26 @@ async def extract_candidates(body: ExtractRequest, container: Container):
         if not run or run.status not in {"completed", "partial"} or not run.result:
             raise HTTPException(400, "请选择已经结束且有结果的研究任务")
         workspace, session = run.execution.workspace_id, run.execution.session_id
-        # The original user request can support decisions; the report supports research leads only.
-        messages = [{"role": "user", "content": run.execution.query},
-                    {"role": "assistant", "content": json.dumps(run.result, ensure_ascii=False)}]
+        if str(run.workflow) != "deep_research":
+            raise HTTPException(400, "仅从 Deep Research 提取研究记忆")
+        messages = await asyncio.to_thread(research_messages, run, (), container.retrieval)
         if sum(len(m["content"]) for m in messages) > 100000:
             raise HTTPException(400, "研究结果过长，请选择关键笔记后提取")
     return await operate(service(container).extract, messages, workspace_id=workspace, session_id=session,
                          reference=body.run_id or session, research=research)
 
 
-@router.get("/candidates")
+@router.get("/candidates", deprecated=True)
 async def list_candidates(container: Container, workspace_id: str = "default", session_id: str | None = None):
     return await operate(service(container).candidates, workspace_id=workspace_id, session_id=session_id)
 
 
-@router.post("/candidates/{identity}/approve")
+@router.post("/candidates/{identity}/approve", deprecated=True)
 async def approve_candidate(identity: str, body: Approval, container: Container):
     return await operate(service(container).approve, identity, confirmed=body.confirmed, revision=body.revision)
 
 
-@router.delete("/candidates/{identity}")
+@router.delete("/candidates/{identity}", deprecated=True)
 async def reject_candidate(identity: str, container: Container):
     await operate(service(container).reject, identity)
     return {"rejected": identity}

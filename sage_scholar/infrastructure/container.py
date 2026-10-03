@@ -15,6 +15,7 @@ from sage_scholar.runtime.checkpoints import Checkpoints
 from sage_scholar.context.manager import ContextManager
 from sage_scholar.memory import MemoryStore, MemoryService, MemoryRecall
 from sage_scholar.rag.embedding import Embedding
+from sage_scholar.memory.background import MemoryBackground
 from sage_scholar.audit import CitationAuditService
 from sage_scholar.audit.fetch import AuditFetch
 
@@ -42,7 +43,9 @@ class ApplicationContainer:
         self.context_manager.memories = self.memory_service
 
         self.evidence_store = self.retrieval.evidence_store
-        self.run_manager = RunManager(max_concurrent_runs=1, store=self.run_store, checkpoints=self.checkpoints)
+        self.memory_background = MemoryBackground(self.memory_service, self.retrieval)
+        self.run_manager = RunManager(max_concurrent_runs=1, store=self.run_store, checkpoints=self.checkpoints,
+            on_completed=self.memory_background.completed)
         self.runtime_provider = ResearchRuntimeProvider(
             self.config,
             llm_client_factory=lambda: self.model_gateway.client,
@@ -68,10 +71,12 @@ class ApplicationContainer:
             run_manager=self.run_manager,
             long_runners=self.runners,
             memory_store=self.memory_service,
+            memory_background=self.memory_background,
         )
 
     async def close(self) -> None:
         await self.run_manager.shutdown()
+        await self.memory_background.close()
         self.runtime_provider.close()
         self.checkpoints.close()
         self.run_store.close()

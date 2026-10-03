@@ -223,7 +223,7 @@ export interface SavedMemory {
   scope: "user" | "workspace" | "session";
   workspace_id: string | null;
   session_id: string | null;
-  source: { kind: string; reference: string | null; quote: string };
+  source: { kind: string; reference: string | null; quote: string; evidence_ids: string[] };
   status: "active" | "superseded" | "deleted";
   importance: number;
   confidence: number;
@@ -232,13 +232,6 @@ export interface SavedMemory {
   superseded_by: string | null;
   created_at: string;
   updated_at: string;
-}
-
-export interface MemoryCandidate extends Omit<SavedMemory, "memory_id" | "status"> {
-  candidate_id: string;
-  revision: number;
-  rationale: string;
-  proposal: { action: string; targets: string[]; reason: string };
 }
 
 export interface SavedRun {
@@ -279,24 +272,13 @@ export async function saveMemory(content: string, type: SavedMemory["type"], mem
   scope: SavedMemory["scope"] = "workspace", workspaceId = "default", sessionId?: string): Promise<SavedMemory> {
   return expectJson(await fetch(`${API_BASE}/api/memories${memoryId ? `/${encodeURIComponent(memoryId)}` : ""}`, {
     method: memoryId ? "PUT" : "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, memory_type: type, scope, workspace_id: workspaceId, session_id: sessionId, confirmed: true }),
+    body: JSON.stringify({ content, memory_type: type, scope, workspace_id: workspaceId, session_id: sessionId }),
   }));
 }
 export async function deleteMemory(memoryId: string): Promise<void> {
   await expectJson(await fetch(`${API_BASE}/api/memories/${encodeURIComponent(memoryId)}`, { method: "DELETE" }));
 }
-export async function listMemoryCandidates(workspaceId: string, sessionId?: string): Promise<MemoryCandidate[]> {
-  const params = new URLSearchParams({ workspace_id: workspaceId });
-  if (sessionId) params.set("session_id", sessionId);
-  return expectJson(await fetch(`${API_BASE}/api/memories/candidates?${params}`));
-}
-export async function extractMemories(input: { messages?: ChatMessage[]; run_id?: string; workspace_id?: string; session_id?: string }): Promise<MemoryCandidate[]> {
+export async function extractMemories(input: { messages?: ChatMessage[]; run_id?: string; workspace_id?: string; session_id?: string }): Promise<SavedMemory[]> {
   return expectJson(await fetch(`${API_BASE}/api/memories/extract`, { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }));
-}
-export async function decideMemoryCandidate(id: string, accept: boolean, revision?: number): Promise<void> {
-  await expectJson(await fetch(`${API_BASE}/api/memories/candidates/${encodeURIComponent(id)}${accept ? "/approve" : ""}`, {
-    method: accept ? "POST" : "DELETE", headers: { "Content-Type": "application/json" },
-    ...(accept ? { body: JSON.stringify({ confirmed: true, revision }) } : {}),
-  }));
 }

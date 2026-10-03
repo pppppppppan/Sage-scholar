@@ -1,15 +1,26 @@
-"""Extraction -> reviewable consolidation -> temporal store -> relevant recall."""
+"""Grounded extraction -> automatic consolidation -> temporal store -> task recall."""
 import json
 import re
+import logging
+import threading
+from collections import OrderedDict
+from sage_scholar.domain.documents import utc_now
+from .store import MemoryConflict
+
 from .extraction import extract, temporary, project_specific
 from .models import MemoryCandidate, MemoryInput, MemorySource, Consolidation, same_scope, scope_fingerprint
 from .recall import normalized
 from sage_scholar.research.structured import structured_response
 
 
+logger = logging.getLogger(__name__)
+
+
 class MemoryService:
     def __init__(self, store, recall, llm_factory):
         self.store, self.index, self.llm_factory = store, recall, llm_factory
+        self._recall_cache = OrderedDict()
+        self._recall_lock = threading.RLock()
 
     def list(self, *args, **kwargs):
         return self.store.list(*args, **kwargs)
@@ -51,22 +62,33 @@ class MemoryService:
         candidate.target_versions = {identity: allowed[identity].version for identity in plan.targets}
         return candidate
 
-    def extract(self, messages, *, workspace_id="default", session_id=None, reference=None, research=False):
+    def extract(self, messages, *, workspace_id="default", session_id=None, reference=None, research=False,
+                started_at=None, cancelled=lambda: False):
+        started_at = started_at or utc_now()
         candidates = extract(self.llm_factory(), messages, workspace_id=workspace_id, session_id=session_id,
                              reference=reference, research=research)
         saved = []
-        for candidate in candidates:
+        for candidate in sorted(candidates, key=lambda c: c.source.message_index or 0):
+            if cancelled():
+                break
+            # Ordering follows source turns; each consolidation sees the previous committed result.
+            candidate.created_at = started_at
             revision, items, _ = self.store.snapshot()
-            candidate = self._plan(candidate, items)
-            targets = [r for r in items if r.memory_id in candidate.proposal.targets]
-            if any(r.status == "deleted" for r in targets):
-                continue
-            saved.append(self.store.save_candidate(candidate, revision))
+            try:
+                candidate = self._plan(candidate, items)
+                targets = [r for r in items if r.memory_id in candidate.proposal.targets]
+                written_here = {r.memory_id for r in saved}
+                stale = any(r.updated_at > started_at and r.memory_id not in written_here for r in targets)
+                if stale or any(r.status == "deleted" for r in targets) or cancelled():
+                    continue
+                saved.append(self.store.commit(candidate, expected_revision=revision))
+                self.index.invalidate()
+            except MemoryConflict:
+                # Never replan an old background job across a user's newer edit/delete.
+                logger.info("Memory changed during extraction; stale automatic write skipped")
         return saved
 
     def approve(self, identity, *, confirmed=False, revision=None):
-        if not confirmed:
-            raise ValueError("确认候选后才能写入记忆")
         _, _, candidates = self.store.snapshot()
         candidate = next((c for c in candidates if c.candidate_id == identity), None)
         if not candidate:
@@ -82,8 +104,6 @@ class MemoryService:
         return self.store.reject(identity)
 
     def add(self, value: MemoryInput, *, source=None):
-        if not value.confirmed:
-            raise ValueError("只保存用户明确要求或确认的记忆")
         if temporary(value.content) and value.scope != "session":
             raise ValueError("临时要求请保存为 session 记忆并指定 session_id，不写入跨会话记忆")
         revision, items, _ = self.store.snapshot()
@@ -106,8 +126,6 @@ class MemoryService:
             source=MemorySource(kind="explicit", quote=content, reference=session_id))
 
     def update(self, identity, value):
-        if not value.confirmed:
-            raise ValueError("修改记忆需要明确确认")
         if temporary(value.content) and value.scope != "session":
             raise ValueError("本轮临时要求应保存到 session 范围")
         revision, items, _ = self.store.snapshot()
@@ -122,9 +140,19 @@ class MemoryService:
         self.index.invalidate()
 
     def recall(self, query, *, workspace_id="default", session_id=None, top_k=5, **kwargs):
-        records = self.store.list(session_id, workspace_id=workspace_id)
-        selected = self.index.rank(query, records, top_k=max(0, min(5, top_k)))
-        # Recheck status/version after embedding inference, so concurrent deletion wins.
-        current = {r.memory_id: r for r in self.store.list(session_id, workspace_id=workspace_id)}
-        return [current[r.memory_id] for r, _ in selected
-                if r.memory_id in current and current[r.memory_id].version == r.version]
+        from .models import visible
+        limit = max(0, min(5, top_k))
+        # Single-flight in this process prevents simultaneous Researchers embedding the same query.
+        with self._recall_lock:
+            revision, items, _ = self.store.snapshot()
+            records = [r for r in items if r.status == "active" and visible(r, workspace_id, session_id)]
+            key = (workspace_id, session_id, query, revision, limit)
+            if key not in self._recall_cache:
+                selected = self.index.rank(query, records, top_k=limit)
+                self._recall_cache[key] = [(r.memory_id, r.version) for r, _ in selected]
+                if len(self._recall_cache) > 256:
+                    self._recall_cache.popitem(last=False)
+            self._recall_cache.move_to_end(key)
+            current = {r.memory_id: r for r in self.store.list(session_id, workspace_id=workspace_id)}
+            return [current[identity] for identity, version in self._recall_cache[key]
+                    if identity in current and current[identity].version == version]
