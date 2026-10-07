@@ -1,6 +1,6 @@
 # SAGE Scholar
 
-SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。当前 V4.4 已支持 Direct、文档 QA、异步 Deep Research 与 Citation Audit，并统一上下文预算、自动长期 Memory 和可恢复 Run。统一查询接口先经过 Router，再按任务复杂度选择执行链。FastAPI 只处理协议，业务编排集中在 `QueryService`，长任务生命周期由 `RunManager` 管理，研究 Graph 只维护 workflow 内部状态。
+SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。当前已完成 Long-term Memory Finalization，支持 Direct、文档 QA、异步 Deep Research 与 Citation Audit，并统一上下文预算、自动长期 Memory 和可恢复 Run。统一查询接口先经过 Router，再按任务复杂度选择执行链。FastAPI 只处理协议，业务编排集中在 `QueryService`，长任务生命周期由 `RunManager` 管理，研究 Graph 只维护 workflow 内部状态。
 
 ```mermaid
 flowchart LR
@@ -17,17 +17,19 @@ flowchart LR
     SSE --> UI
 ```
 
-## V4.4：自动长期记忆与本地引用身份核验（2026-10-03）
+## Long-term Memory Finalization（2026-10-07）
 
-- Direct / QA 正常完成，以及 Deep Research completed/partial 后，进入有界 asyncio 后台队列抽取记忆；失败只记日志，不改变主响应或 Run 结果。无需用户确认。
+- Direct / QA 成功后先将 MemoryExtractionJob 写入现有 runtime.sqlite3，再后台调用模型；Deep Research completed/partial 后同样入队。启动恢复 pending/running/retryable，并补查已完成但未入队的 Research。无需用户确认。
 - Memory Policy 仅接受有原句依据的稳定偏好、项目决策、长期背景和研究线索；低置信度、临时要求、助手猜测、无原文依据的结果跳过。保存完整原句，避免模型改写产生额外事实。临时请求继续由 Context/Run state 管理；显式 CRUD 仍可保存 session 笔记。
-- 复用既有 scope、语义去重与 new/merge/update/ignore；长期冲突替换旧 active 版本并保留 superseded 历史，自动抽取不能复活已删除记忆。手动修改/删除优先，过期后台写入跳过。
+- new 新增；ignore 不改原记录；update 明确替代旧版并保留 superseded 历史；merge 原样保留双方有效内容与来源，超过记录长度则保留两条 active，不做有损改写。用户手工编辑受保护；deleted tombstone 和过期写入检查防止自动覆盖/复活。
 - Recall 结合原问题、当前任务 objective、契约维度和调用用途。按 workspace/session、查询、持久化 revision 缓存至多 256 组 ID/version，重复调用不重复 query embedding；记忆变更自然失效。仍最多注入 5 条相关有效记忆。
-- 研究线索仅从服务端 ResearchNote finding / final Claim 取原句，关联经过 SourcePolicy 和原文可读性检查的 evidence_ids。Memory 不是 Evidence；Writer/Verifier 必须回到原文核验。
-- 面板支持查看、修改、删除、历史版本、来源和 Evidence ID；自动入库不再有确认候选 UI。旧 confirmed 字段与候选 API 仅为 deprecated 兼容，不作为写入门槛。
+- 自动与手动重新抽取共用持久化 Research 输入读取器：优先原 checkpoint 中的 Contract/Notes，缺失时从 SQLite Run/事件重建；包含 final claims、gaps/conflicts/unknowns。研究出处保存 run_id、research_note_id/task_id、claim_id（如有）、quote 和通过原文检查的 evidence_ids。Memory 不是 Evidence。
+- 面板支持查看、修改、删除、版本、完整来源及后台任务状态。已删除 confirmed 字段、approve/reject/candidates API 和候选持久审批流程。旧 memory.json 首次写入升级 schema 3，原文件备份为 memory.pre-finalization.json。
 - Citation Audit 在允许的本地文档中先匹配 DOI/arXiv/document_id，再规范化精确题名；已有作者/年份用于排除冲突，缺失不伪装成已核验。多文档同名返回 ambiguous + uncertain，不选第一条；允许联网且本地未找到时才使用现有 paper-search。source_not_found 不等于 fabricated。
 - 沿用 [GauzMem](https://github.com/fightheyyy/gauzmem) 的可追溯抽取、consolidation、语义召回与时间生命周期思路；不引入新依赖、分布式服务或第二套 Context/Recovery。
-- 后台抽取是 best-effort：进程终止或队列满可能跳过；已写入记忆持久保存，可在面板重新整理对话/研究。没有将 Memory 后处理伪装成新的 durable workflow。
+- Job 使用稳定 source key；抽取草稿先持久化，Memory 与操作回执原子写入并 fsync。崩溃后可重试模型调用，但不会因重复提交复活或重复创建已处理记忆；不承诺外部模型调用 exactly-once。失败最多自动尝试 3 次，之后保留 failed，用户可重新整理。
+- `/api/memories/extract` 返回 HTTP 202 和 job；GET `/api/memories/jobs` 或 `/jobs/{id}` 查看状态。手动重新抽取也复用原 source/job，不新增第二套写入流程。
+- 边界：磁盘不可写时对话仍返回并记录持久化错误，该次对话抽取无法保证恢复；Research 可由持久化完成记录补入队。语义去重/冲突分类仍依赖模型判断。该模块架构到此冻结，仅修明确 bug。
 
 ## V4.2：统一 Context 与 QA 连续追问（2026-10-02）
 

@@ -18,6 +18,8 @@ def create_app(container: ApplicationContainer | None = None) -> FastAPI:
         app.state.container = application_container
         if hasattr(application_container.run_manager, "recover"):
             await application_container.run_manager.recover()
+        if hasattr(application_container, "memory_background"):
+            await application_container.memory_background.recover()
         yield
         await application_container.close()
 

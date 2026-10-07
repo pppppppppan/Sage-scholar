@@ -215,6 +215,17 @@ export function startRunEvents(
   return () => { controller.abort(); clearTimeout(timer); };
 }
 
+export interface MemorySource {
+  kind: string; reference: string | null; quote: string; evidence_ids: string[];
+  run_id: string | null; research_note_id: string | null; task_id: string | null; claim_id: string | null;
+}
+
+export interface MemoryExtractionJob {
+  job_id: string; source_type: string; source_id: string;
+  status: "pending" | "running" | "retryable" | "succeeded" | "failed";
+  attempts: number; created_at: string; updated_at: string; error: string | null;
+}
+
 export interface SavedMemory {
   memory_id: string;
   content: string;
@@ -223,7 +234,8 @@ export interface SavedMemory {
   scope: "user" | "workspace" | "session";
   workspace_id: string | null;
   session_id: string | null;
-  source: { kind: string; reference: string | null; quote: string; evidence_ids: string[] };
+  source: MemorySource;
+  sources: MemorySource[];
   status: "active" | "superseded" | "deleted";
   importance: number;
   confidence: number;
@@ -278,7 +290,13 @@ export async function saveMemory(content: string, type: SavedMemory["type"], mem
 export async function deleteMemory(memoryId: string): Promise<void> {
   await expectJson(await fetch(`${API_BASE}/api/memories/${encodeURIComponent(memoryId)}`, { method: "DELETE" }));
 }
-export async function extractMemories(input: { messages?: ChatMessage[]; run_id?: string; workspace_id?: string; session_id?: string }): Promise<SavedMemory[]> {
+export async function extractMemories(input: { messages?: ChatMessage[]; run_id?: string; workspace_id?: string; session_id?: string }): Promise<MemoryExtractionJob> {
   return expectJson(await fetch(`${API_BASE}/api/memories/extract`, { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }));
+}
+
+export async function listMemoryJobs(workspaceId: string, sessionId?: string): Promise<MemoryExtractionJob[]> {
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  if (sessionId) params.set("session_id", sessionId);
+  return expectJson(await fetch(`${API_BASE}/api/memories/jobs?${params}`));
 }

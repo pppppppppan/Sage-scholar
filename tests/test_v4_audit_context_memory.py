@@ -34,8 +34,8 @@ def test_audit_reuses_verifier_with_joint_evidence(tmp_path, status):
 
 def test_memory_explicit_crud_and_context_protection(tmp_path):
     memories = MemoryStore(str(tmp_path))
-    saved = memories.add(MemoryInput(content="不考虑微调；FNO 更好", confirmed=True))
-    memories.update(saved.memory_id, MemoryInput(content="不考虑微调", confirmed=True))
+    saved = memories.add(MemoryInput(content="不考虑微调；FNO 更好"))
+    memories.update(saved.memory_id, MemoryInput(content="不考虑微调"))
     manager = ContextManager(str(tmp_path), max_tokens=6000, memories=memories)
     request = contract().execution.model_copy(update={"query": "这次也比较微调方案", "allow_web": False,
         "history": [{"role": "user", "content": "不要使用私有数据"}], "request_id": "r1"})
@@ -79,7 +79,7 @@ def test_long_history_preserves_constraints_and_evidence_reread(tmp_path):
     assert len(records) == 1 and records[0]["truncated"]
     with pytest.raises(ValueError): sources.context.get("mem_fake")
     memories = MemoryStore(str(tmp_path))
-    memories.add(MemoryInput(content="FNO is better", confirmed=True))
+    memories.add(MemoryInput(content="FNO is better"))
     manager.memories = memories
     assert "FNO is better" not in json.dumps(manager.prepare([{"role": "user", "content": "verify"}],
         request=request, include_memory=False, output_reserve=1000).messages)
@@ -108,9 +108,9 @@ def test_audit_and_memory_http_paths_share_existing_evidence_and_replay(tmp_path
     container = SimpleNamespace(run_manager=manager, audit_service=service,
         memory_store=MemoryStore(str(tmp_path)), close=close)
     with TestClient(create_app(container)) as client:
-        record = client.post("/api/memories", json={"content": "不考虑微调", "confirmed": True}).json()
+        record = client.post("/api/memories", json={"content": "不考虑微调"}).json()
         assert client.get("/api/memories").json()[0]["memory_id"] == record["memory_id"]
-        assert client.put("/api/memories/" + record["memory_id"], json={"content": "可以比较微调", "confirmed": True}).json()["content"] == "可以比较微调"
+        assert client.put("/api/memories/" + record["memory_id"], json={"content": "可以比较微调"}).json()["content"] == "可以比较微调"
         assert client.delete("/api/memories/" + record["memory_id"]).status_code == 200
         assert client.get("/api/memories").json() == []
         response = client.post("/api/audits", json={"source_scope": "public", "allow_web": True,

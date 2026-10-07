@@ -36,6 +36,22 @@ class RunStore:
                 "SELECT payload FROM events WHERE run_id=? ORDER BY sequence", (row[1],))])
                 for row in self.conn.execute("SELECT snapshot,id FROM runs").fetchall()]
 
+    def get(self, run_id):
+        with self.lock:
+            row = self.conn.execute("SELECT snapshot FROM runs WHERE id=?", (run_id,)).fetchone()
+            return RunSnapshot.model_validate_json(row[0]) if row else None
+
+    def events_for(self, run_id):
+        with self.lock:
+            return [RunEvent.model_validate_json(row[0]) for row in self.conn.execute(
+                "SELECT payload FROM events WHERE run_id=? ORDER BY sequence", (run_id,))]
+
+    def finished_research(self):
+        with self.lock:
+            return [run for row in self.conn.execute("SELECT snapshot FROM runs")
+                    if (run := RunSnapshot.model_validate_json(row[0])).workflow == "deep_research"
+                    and run.status in {"completed", "partial"}]
+
     def append(self, snapshot, event):
         # Event and lifecycle snapshot become visible atomically before SSE notification.
         with self.transaction() as db:

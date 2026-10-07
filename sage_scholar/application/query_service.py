@@ -87,7 +87,7 @@ class QueryService:
                 memory = await asyncio.to_thread(self._memory_store.remember, explicit_memory[1],
                     workspace_id=command.workspace_id, session_id=command.session_id or command.conversation_id)
             else:
-                memory = await asyncio.to_thread(self._memory_store.add, MemoryInput(content=explicit_memory[1], confirmed=True))
+                memory = await asyncio.to_thread(self._memory_store.add, MemoryInput(content=explicit_memory[1]))
             return QueryResult(request_id=request_id, route=self._router.route(command.query, requested_workflow=Workflow.DIRECT),
                                status=QueryStatus.INLINE, answer=f"已记住：{memory.content}。可在记忆管理中修改或删除。")
         document_ids = command.document_ids

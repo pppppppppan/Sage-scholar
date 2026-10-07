@@ -1,5 +1,4 @@
 import asyncio
-from sage_scholar.memory.background import research_messages
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, model_validator
 from sage_scholar.memory import MemoryInput
@@ -18,7 +17,7 @@ async def operate(fn, *args, **kwargs):
     try:
         return await asyncio.to_thread(fn, *args, **kwargs)
     except KeyError as exc:
-        raise HTTPException(404, "memory/candidate not found") from exc
+        raise HTTPException(404, "memory/job not found") from exc
     except MemoryConflict as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
@@ -52,43 +51,38 @@ class ExtractRequest(BaseModel):
         return self
 
 
-class Approval(BaseModel):
-    confirmed: bool = Field(default=False, deprecated=True)
-    revision: int | None = None
+def public_job(job):
+    return {key: job[key] for key in ('job_id','source_type','source_id','workspace_id','session_id',
+        'status','attempts','created_at','updated_at')} | {
+        "error": "记忆整理失败，可重新提交；已有记忆不会被清空。" if job['error'] else None}
 
 
-@router.post("/extract")
-async def extract_candidates(body: ExtractRequest, container: Container):
-    messages = [m.model_dump() for m in body.messages]
-    workspace, session, research = body.workspace_id, body.session_id, bool(body.run_id)
-    if body.run_id:
-        run = container.run_manager.get(body.run_id)
-        if not run or run.status not in {"completed", "partial"} or not run.result:
-            raise HTTPException(400, "请选择已经结束且有结果的研究任务")
-        workspace, session = run.execution.workspace_id, run.execution.session_id
-        if str(run.workflow) != "deep_research":
-            raise HTTPException(400, "仅从 Deep Research 提取研究记忆")
-        messages = await asyncio.to_thread(research_messages, run, (), container.retrieval)
-        if sum(len(m["content"]) for m in messages) > 100000:
-            raise HTTPException(400, "研究结果过长，请选择关键笔记后提取")
-    return await operate(service(container).extract, messages, workspace_id=workspace, session_id=session,
-                         reference=body.run_id or session, research=research)
+@router.post("/extract", status_code=202)
+async def extract_memory(body: ExtractRequest, container: Container):
+    try:
+        if body.run_id:
+            job = container.memory_background.enqueue_research(body.run_id, retry=True)
+        else:
+            job = container.memory_background.enqueue_conversation([m.model_dump() for m in body.messages],
+                workspace_id=body.workspace_id, session_id=body.session_id, retry=True)
+        return public_job(job)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, "无法保存记忆整理任务，请稍后重试。") from exc
 
 
-@router.get("/candidates", deprecated=True)
-async def list_candidates(container: Container, workspace_id: str = "default", session_id: str | None = None):
-    return await operate(service(container).candidates, workspace_id=workspace_id, session_id=session_id)
+@router.get("/jobs")
+async def list_jobs(container: Container, workspace_id: str = "default", session_id: str | None = None):
+    return [public_job(job) for job in container.memory_jobs.list(workspace_id, session_id)]
 
 
-@router.post("/candidates/{identity}/approve", deprecated=True)
-async def approve_candidate(identity: str, body: Approval, container: Container):
-    return await operate(service(container).approve, identity, confirmed=body.confirmed, revision=body.revision)
-
-
-@router.delete("/candidates/{identity}", deprecated=True)
-async def reject_candidate(identity: str, container: Container):
-    await operate(service(container).reject, identity)
-    return {"rejected": identity}
+@router.get("/jobs/{identity}")
+async def get_job(identity: str, container: Container):
+    job = container.memory_jobs.get(identity)
+    if not job:
+        raise HTTPException(404, "memory job not found")
+    return public_job(job)
 
 
 @router.put("/{identity}")

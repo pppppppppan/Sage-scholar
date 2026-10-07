@@ -17,6 +17,10 @@ class MemorySource(BaseModel):
     quote: str = ""
     message_index: int | None = None
     evidence_ids: list[str] = Field(default_factory=list)
+    run_id: str | None = None
+    research_note_id: str | None = None
+    task_id: str | None = None
+    claim_id: str | None = None
 
 
 class MemoryInput(BaseModel):
@@ -25,7 +29,6 @@ class MemoryInput(BaseModel):
     scope: Scope = "workspace"
     workspace_id: str | None = "default"
     session_id: str | None = None
-    confirmed: bool = Field(default=False, deprecated=True, description="Deprecated compatibility field; never gates writes")
     importance: float = Field(default=0.6, ge=0, le=1)
 
     @computed_field
@@ -67,21 +70,19 @@ class Consolidation(BaseModel):
     action: Literal["new", "merge", "update", "ignore"] = "new"
     targets: list[str] = Field(default_factory=list, max_length=8)
     reason: str = ""
-    # No model-written replacement text: the new version always uses grounded source content.
+    # The store performs lossless concatenation for merge; no model-written replacement text.
 
 
 class MemoryCandidate(MemoryInput):
-    candidate_id: str = Field(default_factory=lambda: "mc_" + uuid4().hex)
+    # Internal extraction proposal, never a pending user approval.
     source: MemorySource
     confidence: float = Field(default=0.7, ge=0, le=1)
     rationale: str
-    status: Literal["pending", "accepted", "rejected"] = "pending"
     proposal: Consolidation = Field(default_factory=Consolidation)
     target_versions: dict[str, int] = Field(default_factory=dict)
     scope_fingerprint: str = ""
-    revision: int = 1
     created_at: datetime = Field(default_factory=utc_now)
-    result_id: str | None = None
+    operation_key: str | None = None
 
 
 def visible(item, workspace_id="default", session_id=None):

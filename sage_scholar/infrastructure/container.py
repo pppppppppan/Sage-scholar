@@ -16,6 +16,7 @@ from sage_scholar.context.manager import ContextManager
 from sage_scholar.memory import MemoryStore, MemoryService, MemoryRecall
 from sage_scholar.rag.embedding import Embedding
 from sage_scholar.memory.background import MemoryBackground
+from sage_scholar.memory.jobs import MemoryJobStore
 from sage_scholar.audit import CitationAuditService
 from sage_scholar.audit.fetch import AuditFetch
 
@@ -43,7 +44,8 @@ class ApplicationContainer:
         self.context_manager.memories = self.memory_service
 
         self.evidence_store = self.retrieval.evidence_store
-        self.memory_background = MemoryBackground(self.memory_service, self.retrieval)
+        self.memory_jobs = MemoryJobStore(self.run_store)
+        self.memory_background = MemoryBackground(self.memory_service, self.retrieval, self.memory_jobs, self.checkpoints)
         self.run_manager = RunManager(max_concurrent_runs=1, store=self.run_store, checkpoints=self.checkpoints,
             on_completed=self.memory_background.completed)
         self.runtime_provider = ResearchRuntimeProvider(

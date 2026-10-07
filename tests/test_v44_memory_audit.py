@@ -14,6 +14,8 @@ from sage_scholar.domain.documents import DocumentRecord, DocumentVersion
 from sage_scholar.domain.execution import RunOutcome
 from sage_scholar.infrastructure.evidence_store import JsonEvidenceStore
 from sage_scholar.memory.background import MemoryBackground
+from sage_scholar.memory.jobs import MemoryJobStore
+from sage_scholar.runtime.store import RunStore
 from sage_scholar.context.manager import ContextManager, CURRENT_REQUEST
 from sage_scholar.routing import Workflow, SourceScope
 from sage_scholar.runtime import RunManager
@@ -67,31 +69,36 @@ def test_inline_completion_schedules_extraction_without_waiting(tmp_path, workfl
     async def scenario():
         text = "这个项目以后都不考虑多用户架构"
         store, memories, _ = memory(tmp_path, {"candidates": [extraction(text)]})
-        background = MemoryBackground(memories, None)
+        db = RunStore(tmp_path)
+        background = MemoryBackground(memories, None, MemoryJobStore(db))
         service, manager, _ = make_service()
         service._memory_background = background
         result = await service.execute(QueryCommand(query=text, workflow=workflow,
             document_ids=["paper-a"] if workflow == Workflow.QA else [], workspace_id="sage", session_id="s1"))
         assert result.answer
-        await asyncio.wait_for(background.queue.join(), timeout=3)
+        await asyncio.wait_for(background.drain(), timeout=3)
         assert store.list(workspace_id="sage")[0].source.reference == result.request_id
         await background.close()
         await manager.shutdown()
+        db.close()
     asyncio.run(scenario())
 
 
 def test_background_model_failure_cannot_fail_response(tmp_path):
     async def scenario():
         _, memories, _ = memory(tmp_path, RuntimeError("provider down"))
-        background = MemoryBackground(memories, None)
+        db = RunStore(tmp_path)
+        background = MemoryBackground(memories, None, MemoryJobStore(db))
         service, manager, _ = make_service()
         service._memory_background = background
+        background.jobs.MAX_ATTEMPTS = 1
         result = await service.execute(QueryCommand(query="介绍一下方法", workflow=Workflow.DIRECT))
         assert result.answer
-        await asyncio.wait_for(background.queue.join(), timeout=3)
+        await asyncio.wait_for(background.drain(), timeout=3)
         assert not memories.list()
         await background.close()
         await manager.shutdown()
+        db.close()
     asyncio.run(scenario())
 
 
@@ -105,8 +112,9 @@ def test_research_automatic_memory_has_real_evidence_ids(tmp_path, status):
         store.save(evidence)
         retrieval = SimpleNamespace(evidence_store=store, documents=None)
         memories, service, _ = memory(tmp_path, {"candidates": [extraction(text, message_index=1, memory_type="research_note")]})
-        background = MemoryBackground(service, retrieval)
-        manager = RunManager(on_completed=background.completed)
+        db = RunStore(tmp_path)
+        background = MemoryBackground(service, retrieval, MemoryJobStore(db))
+        manager = RunManager(store=db, on_completed=background.completed)
         class Runner:
             async def run(self, request, emit, cancelled):
                 await emit("research_task_completed", {"note": {"task_id": "T1", "findings": [
@@ -114,7 +122,7 @@ def test_research_automatic_memory_has_real_evidence_ids(tmp_path, status):
                 return RunOutcome(status=status, result={"report": "report"})
         run = await manager.start(contract().execution, Runner())
         _ = [event async for event in manager.events(run.run_id)]
-        await asyncio.wait_for(background.queue.join(), timeout=3)
+        await asyncio.wait_for(background.drain(), timeout=3)
         saved = memories.list()[0]
         assert saved.source.reference == run.run_id
         assert saved.source.evidence_ids == [evidence.evidence_id] and saved.memory_type == "research_note"
@@ -122,6 +130,7 @@ def test_research_automatic_memory_has_real_evidence_ids(tmp_path, status):
         assert CURRENT_REQUEST.get() is None
         await background.close()
         await manager.shutdown()
+        db.close()
     asyncio.run(scenario())
 
 

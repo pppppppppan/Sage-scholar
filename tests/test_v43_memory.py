@@ -24,7 +24,7 @@ class Embedding:
 
 
 def value(content, **kwargs):
-    return MemoryInput(content=content, confirmed=True, **kwargs)
+    return MemoryInput(content=content, **kwargs)
 
 
 def memory(tmp_path, *responses):
@@ -88,7 +88,7 @@ def test_extraction_automatically_saves_only_grounded_durable_content(tmp_path):
         {"role": "user", "content": "这轮只比较三篇论文"}], workspace_id="sage", session_id="s1")
     assert len(result) == len(store.list(all_scopes=True)) == 1
     assert result[0].source.quote == content and result[0].workspace_id == "sage"
-    assert service.candidates(workspace_id="sage") == []
+    assert not hasattr(service, "approve")
 
 
 @pytest.mark.parametrize("action", ["ignore", "merge", "update"])
@@ -153,21 +153,33 @@ def test_restart_and_legacy_migration_preserve_scope_source_history(tmp_path):
     store.update("mem_legacy", value("以后也考虑微调", memory_type="decision"))
     reloaded = MemoryStore(tmp_path)
     assert len(reloaded.list(include_inactive=True)) == 2 and reloaded.list()[0].version == 2
-    assert json.loads((tmp_path / "memory.json").read_text())["schema"] == 2
+    assert json.loads((tmp_path / "memory.json").read_text())["schema"] == 3
 
 
 def test_memory_http_automatic_writes_and_scope(tmp_path):
     from sage_scholar.api.app import create_app
     text = "以后本项目考虑微调"
     store, service, _ = memory(tmp_path, {"candidates": [extraction(text)]})
+    from sage_scholar.runtime.store import RunStore
+    from sage_scholar.memory.jobs import MemoryJobStore
+    from sage_scholar.memory.background import MemoryBackground
+    db = RunStore(tmp_path)
+    jobs = MemoryJobStore(db)
+    background = MemoryBackground(service, None, jobs)
     async def close():
-        pass
-    container = SimpleNamespace(memory_store=store, memory_service=service, run_manager=SimpleNamespace(), close=close)
+        await background.close()
+        db.close()
+    container = SimpleNamespace(memory_store=store, memory_service=service, run_manager=SimpleNamespace(),
+        memory_background=background, memory_jobs=jobs, close=close)
     with TestClient(create_app(container)) as client:
         response = client.post("/api/memories/extract", json={"workspace_id": "sage", "session_id": "s1",
             "messages": [{"role": "user", "content": text}]})
-        assert response.status_code == 200
-        saved = response.json()[0]
+        assert response.status_code == 202
+        client.portal.call(background.drain)
+        assert client.get("/api/memories/jobs/" + response.json()["job_id"]).json()["status"] == "succeeded"
+        saved = client.get("/api/memories?workspace_id=sage").json()[0]
+        assert client.get("/api/memories/candidates").status_code in {404, 405}
+        assert client.post("/api/memories/candidates/old/approve", json={}).status_code == 404
         assert saved["status"] == "active" and saved["source"]["quote"] == text
         assert client.get("/api/memories").json() == []
         assert len(client.get("/api/memories?workspace_id=sage").json()) == 1
