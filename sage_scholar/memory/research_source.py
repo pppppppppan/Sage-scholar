@@ -1,5 +1,6 @@
 """One durable research input reader for automatic extraction and manual re-extraction."""
 from pydantic import BaseModel
+from .conversation_source import conversation_messages
 from sage_scholar.domain.research import ResearchContract
 from sage_scholar.research.evidence_context import ResearchEvidenceContext
 
@@ -41,7 +42,7 @@ class ResearchMemorySource:
         if isinstance(contract.get('execution'), dict):
             contract['execution'].pop('history', None)
         # The source request is authority for preferences; research material is only a lead.
-        messages = [{'role': 'user', 'content': run.execution.query}]
+        messages = conversation_messages(run.execution)
         access = ResearchEvidenceContext(self.retrieval.evidence_store, run.execution.source_policy, self.retrieval.documents)
         findings = []
         for note in notes.values():

@@ -33,7 +33,7 @@ class ApplicationContainer:
         self.run_store = RunStore(self.config.data_dir)
         self.checkpoints = Checkpoints(self.config.data_dir)
         self.context_manager = ContextManager(self.config.data_dir, max_tokens=self.config.context.max_tokens,
-            reserve_ratio=self.config.context.reserve_ratio, memories=self.memory_store)
+            reserve_ratio=self.config.context.reserve_ratio)
         self.context_manager.run_store = self.run_store
         self.model_gateway = LegacyModelGateway(self.config)
         self.model_gateway.context_manager = self.context_manager

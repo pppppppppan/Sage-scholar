@@ -1,6 +1,6 @@
 # SAGE Scholar
 
-SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。当前已完成 Long-term Memory Finalization，支持 Direct、文档 QA、异步 Deep Research 与 Citation Audit，并统一上下文预算、自动长期 Memory 和可恢复 Run。统一查询接口先经过 Router，再按任务复杂度选择执行链。FastAPI 只处理协议，业务编排集中在 `QueryService`，长任务生命周期由 `RunManager` 管理，研究 Graph 只维护 workflow 内部状态。
+SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。当前已完成 Long-term Memory Final Fix，支持 Direct、文档 QA、异步 Deep Research 与 Citation Audit，并统一上下文预算、自动长期 Memory 和可恢复 Run。统一查询接口先经过 Router，再按任务复杂度选择执行链。FastAPI 只处理协议，业务编排集中在 `QueryService`，长任务生命周期由 `RunManager` 管理，研究 Graph 只维护 workflow 内部状态。
 
 ```mermaid
 flowchart LR
@@ -16,6 +16,15 @@ flowchart LR
     RM --> SSE[SSE Events]
     SSE --> UI
 ```
+
+## Long-term Memory Final Fix（2026-10-08）
+
+- 人工保护仅针对匹配的 consolidation target / tombstone 及人工废弃的历史版本；同一 workspace 中无关记忆被编辑或删除，不再抑制新候选。提交锁内继续核对 revision、目标版本和状态；并发冲突由原持久任务重试并重新规划，不沿用旧合并结果。
+- Direct / QA 与 Research 的抽取源包含最近最多 6 条、合计 24,000 字符的完整历史消息；只取连续尾部，不截断原句。历史消息只作上下文，当前用户决定才可新入库。Direct / QA 在入队时保存该快照，Research 从原持久 Run 读取。
+- 用户明确接受、拒绝或修改先前方案时，生成可独立理解的 canonical memory。先核对确认原话与上下文的完整原句锚点，再通过现有 Model Gateway 独立核验支持关系、长期意图和最终决定；未确认的助手建议、含糊确认和超出原话的结论不保存。无改写的直接记忆仍保留原句。
+- 来源保存确认原话、被确认的完整消息、消息 ID（有则保存）、抽取快照索引和原 history 索引、决策类型与核验理由。记忆面板可展开查看原话和方案上下文。字段为兼容性追加，旧 prepared job 的操作回执保持有效。
+- 删除旧 `MemoryStore.recall()`；正式入口统一为 `MemoryService.recall()`，原 task-aware semantic + lexical 排序、revision 缓存和 Context token budget 保持不变。Memory 仍不充当科研 Evidence。
+- 正确性边界：语义支持与同义去重仍依赖模型判断；原消息超出近期窗口或确认对象不明时宁可不保存，需要用户明确重述。模型/磁盘故障沿用原任务重试与失败状态，不伪造确认。
 
 ## Long-term Memory Finalization（2026-10-07）
 

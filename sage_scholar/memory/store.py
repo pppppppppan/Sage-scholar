@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from sage_scholar.domain.documents import utc_now
 from sage_scholar.infrastructure.json_store import file_lock, write_json
-from .models import MemoryInput, MemoryRecord, MemorySource, visible, same_scope, scope_fingerprint
+from .models import MemoryInput, MemoryRecord, MemorySource, visible, same_scope, scope_fingerprint, protected_ancestors
 from .recall import normalized
 
 
@@ -96,13 +96,14 @@ class MemoryStore:
             for target in targets:
                 if not same_scope(target, candidate) or target.version != candidate.target_versions.get(target.memory_id):
                     raise MemoryConflict("记忆范围或版本已变化")
+            # Only matched targets/tombstones protect content. An unrelated manual
+            # edit is not a veto on this candidate; revision conflicts above replan.
+            protected = protected_ancestors(items) if not manual else set()
             suppressed = not manual and (
-                any(r.status == "deleted" and same_scope(r, candidate)
+                any((r.status == "deleted" or r.memory_id in protected) and same_scope(r, candidate)
                     and normalized(r.content) == normalized(candidate.content) for r in items)
                 or any(r.status != "active" for r in targets)
-                or (action != "ignore" and any(r.manual_revision for r in targets))
-                or any(r.updated_at > candidate.created_at and same_scope(r, candidate)
-                       and (r.manual_revision or r.status == "deleted") for r in items))
+                or (action != "ignore" and any(r.manual_revision for r in targets)))
             if suppressed:
                 if key:
                     receipts[key] = None
@@ -184,7 +185,3 @@ class MemoryStore:
                 raise KeyError(identity)
             item.status, item.manual_revision, item.updated_at = "deleted", True, utc_now()
             self._write(revision, items, receipts)
-
-    def recall(self, query, *, workspace_id="default", session_id=None, top_k=5, **kwargs):
-        from .recall import lexical_rank
-        return [r for r, _ in lexical_rank(query, self.list(session_id, workspace_id=workspace_id))[:max(0, min(5, top_k))]]

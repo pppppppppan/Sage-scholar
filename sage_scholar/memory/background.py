@@ -8,6 +8,7 @@ import threading
 from datetime import datetime
 from sage_scholar.domain.documents import utc_now
 from .models import MemoryCandidate
+from .conversation_source import conversation_messages
 from .research_source import ResearchMemorySource
 
 logger = logging.getLogger(__name__)
@@ -57,8 +58,7 @@ class MemoryBackground:
     def conversation(self, request, answer, *, started_at=None):
         try:
             # Small durable write completes before the HTTP response; inference stays background-only.
-            return self.enqueue_conversation([{'role':'user','content':request.query},
-                {'role':'assistant','content':answer or ''}], workspace_id=request.workspace_id,
+            return self.enqueue_conversation(conversation_messages(request, answer or ''), workspace_id=request.workspace_id,
                 session_id=request.session_id or request.conversation_id, source_id=request.request_id,
                 started_at=started_at)
         except Exception:

@@ -11,11 +11,27 @@ MemoryType = Literal["preference", "note", "decision", "background", "research_n
 Scope = Literal["user", "workspace", "session"]
 
 
+MemoryRelation = Literal["direct", "accepted", "rejected", "modified"]
+
+
+class MemoryMessage(BaseModel):
+    """Immutable source snapshot; indices address the persisted extraction job's messages."""
+    message_index: int = Field(ge=0)
+    message_id: str | None = None
+    history_index: int | None = None
+    role: Literal["user", "assistant"]
+    content: str
+    quote: str
+
+
 class MemorySource(BaseModel):
     kind: Literal["manual", "explicit", "conversation", "research", "legacy"] = "manual"
     reference: str | None = None
     quote: str = ""
     message_index: int | None = None
+    messages: list[MemoryMessage] = Field(default_factory=list)
+    relation: MemoryRelation = "direct"
+    grounding_reason: str | None = None
     evidence_ids: list[str] = Field(default_factory=list)
     run_id: str | None = None
     research_note_id: str | None = None
@@ -97,3 +113,18 @@ def same_scope(a, b):
 def scope_fingerprint(items, candidate):
     state = sorted((r.memory_id, r.version, r.status) for r in items if same_scope(r, candidate))
     return hashlib.sha256(json.dumps(state).encode()).hexdigest()
+
+
+def protected_ancestors(items):
+    """Versions retired by a human action must not be automatically resurrected."""
+    records = {r.memory_id: r for r in items}
+    pending = [parent for r in items if r.manual_revision or r.status == "deleted" for parent in r.supersedes]
+    protected = set()
+    while pending:
+        identity = pending.pop()
+        if identity in protected:
+            continue
+        protected.add(identity)
+        if identity in records:
+            pending.extend(records[identity].supersedes)
+    return protected

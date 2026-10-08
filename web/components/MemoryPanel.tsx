@@ -78,6 +78,15 @@ export default function MemoryPanel({ workspaceId, sessionId, messages, runs }: 
       <details className="text-xs"><summary>来源与版本</summary>
         {[m.source, ...m.sources.filter(s => JSON.stringify(s) !== JSON.stringify(m.source))].map((source, i) => <div key={i} className="my-2">
           <p>{source.kind} · {source.reference}</p><p>{source.quote}</p>
+          {source.relation && source.relation !== "direct" && <p>
+            用户决策：{{ accepted: "接受方案", rejected: "拒绝方案", modified: "修改方案" }[source.relation]}
+          </p>}
+          {source.messages?.map((message, index) => <details key={index} className="my-1">
+            <summary>{message.role === "user" ? "用户原话" : "方案上下文"} · 消息 #{(message.history_index ?? message.message_index) + 1}</summary>
+            {message.message_id && <p>消息 ID：{message.message_id}</p>}
+            <p className="whitespace-pre-wrap">摘录：{message.quote}</p>
+            {message.content !== message.quote && <p className="whitespace-pre-wrap">完整消息：{message.content}</p>}
+          </details>)}
           {source.run_id && <p>Run：{source.run_id}</p>}
           {source.research_note_id && <p>ResearchNote：{source.research_note_id} · Task：{source.task_id}</p>}
           {source.claim_id && <p>Claim：{source.claim_id}</p>}

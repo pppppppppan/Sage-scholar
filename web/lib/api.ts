@@ -215,8 +215,16 @@ export function startRunEvents(
   return () => { controller.abort(); clearTimeout(timer); };
 }
 
+export interface MemoryMessage {
+  message_index: number; message_id: string | null; history_index: number | null;
+  role: "user" | "assistant"; content: string; quote: string;
+}
+
 export interface MemorySource {
   kind: string; reference: string | null; quote: string; evidence_ids: string[];
+  messages?: MemoryMessage[];
+  relation?: "direct" | "accepted" | "rejected" | "modified";
+  grounding_reason?: string | null;
   run_id: string | null; research_note_id: string | null; task_id: string | null; claim_id: string | null;
 }
 

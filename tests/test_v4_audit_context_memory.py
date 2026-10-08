@@ -8,7 +8,7 @@ from sage_scholar.domain import EvidenceRef
 from sage_scholar.infrastructure.evidence_store import JsonEvidenceStore
 from sage_scholar.research.verification import CitationVerifier
 from sage_scholar.context.manager import ContextManager
-from sage_scholar.memory import MemoryStore, MemoryInput
+from sage_scholar.memory import MemoryStore, MemoryInput, MemoryService, MemoryRecall
 from types import SimpleNamespace
 
 
@@ -36,7 +36,7 @@ def test_memory_explicit_crud_and_context_protection(tmp_path):
     memories = MemoryStore(str(tmp_path))
     saved = memories.add(MemoryInput(content="不考虑微调；FNO 更好"))
     memories.update(saved.memory_id, MemoryInput(content="不考虑微调"))
-    manager = ContextManager(str(tmp_path), max_tokens=6000, memories=memories)
+    manager = ContextManager(str(tmp_path), max_tokens=6000, memories=MemoryService(memories, MemoryRecall(tmp_path), lambda: ScriptedLLM()))
     request = contract().execution.model_copy(update={"query": "这次也比较微调方案", "allow_web": False,
         "history": [{"role": "user", "content": "不要使用私有数据"}], "request_id": "r1"})
     original = "source " * 10000
@@ -80,7 +80,7 @@ def test_long_history_preserves_constraints_and_evidence_reread(tmp_path):
     with pytest.raises(ValueError): sources.context.get("mem_fake")
     memories = MemoryStore(str(tmp_path))
     memories.add(MemoryInput(content="FNO is better"))
-    manager.memories = memories
+    manager.memories = MemoryService(memories, MemoryRecall(tmp_path), lambda: ScriptedLLM())
     assert "FNO is better" not in json.dumps(manager.prepare([{"role": "user", "content": "verify"}],
         request=request, include_memory=False, output_reserve=1000).messages)
 
