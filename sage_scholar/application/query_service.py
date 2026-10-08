@@ -18,6 +18,8 @@ from .direct_service import DirectService
 from .document_resolver import DocumentResolver
 from .ports import LongTaskRunner
 from .qa_service import QAService
+from .inline_runner import InlineRunner
+from sage_scholar.runtime.limits import execution_budget
 
 
 class QueryStatus(StrEnum):
@@ -41,6 +43,7 @@ class QueryCommand:
     session_id: str | None = None
     budget: dict = field(default_factory=dict)
     metadata: dict = field(default_factory=dict)
+    request_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -77,19 +80,12 @@ class QueryService:
         self._qa = qa
         self._run_manager = run_manager
         self._long_runners = long_runners
+        self.inline_runner = InlineRunner(direct, qa, memory_store)
 
     async def execute(self, command: QueryCommand) -> QueryResult:
         started_at = utc_now()
-        request_id = uuid.uuid4().hex
+        request_id = command.request_id or uuid.uuid4().hex
         explicit_memory = re.fullmatch(r"(?:请)?记住[：:]\s*(.+)", command.query.strip(), re.S)
-        if self._memory_store and explicit_memory:
-            if hasattr(self._memory_store, "remember"):
-                memory = await asyncio.to_thread(self._memory_store.remember, explicit_memory[1],
-                    workspace_id=command.workspace_id, session_id=command.session_id or command.conversation_id)
-            else:
-                memory = await asyncio.to_thread(self._memory_store.add, MemoryInput(content=explicit_memory[1]))
-            return QueryResult(request_id=request_id, route=self._router.route(command.query, requested_workflow=Workflow.DIRECT),
-                               status=QueryStatus.INLINE, answer=f"已记住：{memory.content}。可在记忆管理中修改或删除。")
         document_ids = command.document_ids
         resolution_message = None
         # Explicit remote/conversation scope and Direct/Search choices retain their semantics.
@@ -98,14 +94,14 @@ class QueryService:
             document_ids, resolution_message = resolution.document_ids, resolution.message
         route = self._router.route(
             command.query,
-            requested_workflow=command.workflow,
+            requested_workflow=Workflow.DIRECT if explicit_memory else command.workflow,
             requested_scope=command.source_scope,
             document_ids=document_ids,
             allow_web=command.allow_web,
         )
         if resolution_message:
             route = route.model_copy(update={"needs_clarification": True, "clarification_message": resolution_message})
-        if route.needs_clarification:
+        if route.needs_clarification and not command.conversation_id:
             return QueryResult(
                 request_id=request_id,
                 route=route,
@@ -119,30 +115,25 @@ class QueryService:
             }),
             query=command.query, request_id=request_id, timezone=command.timezone, workspace_id=command.workspace_id,
             history=command.history, conversation_id=command.conversation_id,
-            session_id=command.session_id, budget=command.budget, metadata=command.metadata,
+            session_id=command.session_id, budget=execution_budget(route.workflow, command.budget),
+            metadata={**command.metadata, **({"clarification_message": route.clarification_message} if route.needs_clarification else {})},
         )
 
-        if route.workflow is Workflow.DIRECT:
+        if route.workflow in {Workflow.DIRECT, Workflow.QA} or route.needs_clarification:
+            if command.conversation_id:
+                run = await self._run_manager.start(execution, self.inline_runner)
+                return QueryResult(request_id=request_id, route=route, status=QueryStatus.ACCEPTED, run_id=run.run_id)
+            async def discard(*args):
+                pass
             with request_context(execution):
-                answer = await self._direct.answer(execution)
+                outcome = await self.inline_runner.run(execution, discard, lambda: False)
+            result = outcome.result
             if self._memory_background:
-                self._memory_background.conversation(execution, answer, started_at=started_at)
-            return QueryResult(request_id=request_id, route=route, status=QueryStatus.INLINE, answer=answer)
-
-        if route.workflow is Workflow.QA:
-            with request_context(execution):
-                result = await self._qa.answer(execution)
-            if self._memory_background:
-                self._memory_background.conversation(execution, result.answer, started_at=started_at)
-            return QueryResult(
-                request_id=request_id,
-                route=route,
-                status=QueryStatus.INLINE,
-                answer=result.answer,
-                evidence=result.evidence,
-                citations=result.citations, citation_issues=result.citation_issues,
-                reading_strategy=result.reading_strategy,
-            )
+                self._memory_background.conversation(execution, result["answer"], started_at=started_at)
+            return QueryResult(request_id=request_id, route=route, status=QueryStatus.INLINE,
+                answer=result["answer"], evidence=[EvidenceRef.model_validate(e) for e in result.get("evidence", [])],
+                citations=result.get("citations", {}), citation_issues=result.get("citation_issues", []),
+                reading_strategy=result.get("reading_strategy"))
 
         runner = self._long_runners.get(route.workflow)
         if runner is not None:

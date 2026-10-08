@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import asyncio
+from sage_scholar.runtime.control import cooperative_thread
 import json
 import re
 
@@ -33,7 +33,7 @@ class QAService:
     async def answer(self, request: ExecutionRequest) -> QAResult:
         conversation = []
         if self._context_manager:
-            bundle = await asyncio.to_thread(self._context_manager.conversation, request,
+            bundle = await cooperative_thread(self._context_manager.conversation, request,
                 summarize=getattr(self._model, "summarize_history", None))
             conversation = bundle.messages()
         retrieval_query = request.query

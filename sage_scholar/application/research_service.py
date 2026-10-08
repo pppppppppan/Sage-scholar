@@ -57,6 +57,7 @@ class ResearchService:
         report_result = {}
         remaining_gaps = []
         evidence_ids = []
+        pending_interaction = None
         try:
             while True:
                 item = await queue.get()
@@ -65,6 +66,8 @@ class ResearchService:
                 if isinstance(item, Exception):
                     raise item
                 event_type, data = item
+                if event_type == "human_input":
+                    pending_interaction = data["interrupts"]
                 if event_type == "write":
                     final_report = data.get("report")
                     report_result = data
@@ -80,11 +83,14 @@ class ResearchService:
         finally:
             await producer
 
+        if pending_interaction:
+            from sage_scholar.runtime.human import RunWaiting
+            raise RunWaiting(pending_interaction)
         if not final_report:
             remaining_gaps.append("未生成研究报告")
         return RunOutcome(
             status="partial" if remaining_gaps else "completed",
             result={**report_result, "report": final_report, "evidence_ids": evidence_ids},
-            reason="研究仍有未覆盖项" if remaining_gaps else None,
+            reason="；".join(remaining_gaps[:4]) if remaining_gaps else None,
             remaining_gaps=remaining_gaps,
         )

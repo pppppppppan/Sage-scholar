@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+from sage_scholar.runtime.control import cooperative_thread
 from collections.abc import Callable
 from datetime import datetime
 import re
@@ -40,7 +40,7 @@ class DirectService:
             }
         ]
         if self._context_manager:
-            bundle = await asyncio.to_thread(self._context_manager.conversation, request,
+            bundle = await cooperative_thread(self._context_manager.conversation, request,
                 summarize=getattr(self._model, "summarize_history", None))
             messages.extend(bundle.messages())
         else:

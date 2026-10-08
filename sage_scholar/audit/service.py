@@ -116,12 +116,17 @@ class CitationAuditService:
         config = self.checkpoints.config(request.run_id) if self.checkpoints and request.run_id else {"recursion_limit": 202}
         snapshot = await asyncio.to_thread(graph.get_state, config) if self.checkpoints and request.run_id else None
         initial = None if snapshot and snapshot.values else {}
+        from sage_scholar.runtime.interaction import resume_command
+        from sage_scholar.runtime.human import RunWaiting, public_interrupts
+        initial = resume_command(snapshot, request.metadata.get("_resume_input", {}), initial)
         loop = asyncio.get_running_loop()
         def produce():
             for event in graph.stream(initial, config, **({"durability": "sync"} if self.checkpoints and request.run_id else {})):
                 if stop.is_set() or cancelled():
                     from sage_scholar.runtime.journal import WorkflowInterrupted
                     raise WorkflowInterrupted("引用核验已停止")
+                if "__interrupt__" in event:
+                    raise RunWaiting(public_interrupts(event["__interrupt__"]))
                 if "verify" in event:
                     item = event["verify"]["items"][-1]
                     asyncio.run_coroutine_threadsafe(emit("audit_claim_checked", item.model_dump(mode="json")), loop).result()

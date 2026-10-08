@@ -16,6 +16,7 @@ class ChatMessage(BaseModel):
 
 
 class QueryRequest(BaseModel):
+    request_id: str | None = Field(default=None, max_length=200)
     query: str = Field(min_length=1, max_length=20_000)
     workflow: Workflow | None = None
     source_scope: SourceScope | None = None
@@ -39,6 +40,7 @@ class QueryRequest(BaseModel):
 
 
 class QueryResponse(BaseModel):
+    conversation_id: str | None = None
     request_id: str
     route: RouteDecision
     status: Literal["inline", "accepted", "needs_clarification", "not_implemented"]

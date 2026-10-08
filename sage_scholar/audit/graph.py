@@ -6,6 +6,8 @@ from sage_scholar.runtime.journal import WorkflowInterrupted
 
 
 class AuditState(TypedDict):
+    human_question: dict | None
+    human_answer: dict | None
     claims: list
     citations: dict
     items: list
@@ -16,8 +18,18 @@ class AuditState(TypedDict):
 def build_audit_graph(service, request, llm, sources, *, checkpointer=None, cancelled=lambda: False):
     verifier = CitationVerifier(llm, sources.context)
     graph = StateGraph(AuditState)
+    def assess_node(state):
+        from sage_scholar.runtime.interaction import assess
+        return {"human_question": assess(request, llm) if checkpointer and (request.metadata.get("human_question") or not request.metadata.get("audit", {}).get("claims")) else None}
+    def human_node(state):
+        from sage_scholar.runtime.interaction import ask
+        return {"human_answer": ask(state.get("human_question"))}
     def parse(state):
-        claims, citations = service.parse(request, llm)
+        from sage_scholar.runtime.control import check_control
+        check_control()
+        clarification = (state.get("human_answer") or {}).get("answer", "")
+        effective = request.model_copy(update={"query": request.query + "\n用户补充：" + clarification}) if clarification else request
+        claims, citations = service.parse(effective, llm)
         return {"claims": claims, "citations": citations, "items": [], "cursor": 0}
     def verify(state):
         if cancelled():
@@ -32,7 +44,11 @@ def build_audit_graph(service, request, llm, sources, *, checkpointer=None, canc
     graph.add_node("parse", parse)
     graph.add_node("verify", verify)
     graph.add_node("render", render)
-    graph.add_edge(START, "parse")
+    graph.add_node("assess", assess_node)
+    graph.add_node("human", human_node)
+    graph.add_edge(START, "assess")
+    graph.add_edge("assess", "human")
+    graph.add_edge("human", "parse")
     graph.add_conditional_edges("parse", route)
     graph.add_conditional_edges("verify", route)
     graph.add_edge("render", END)

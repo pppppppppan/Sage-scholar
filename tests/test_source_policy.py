@@ -76,7 +76,7 @@ def test_router_contract_reaches_actual_research_service_runtime(scope, ids):
                                manager, {Workflow.DEEP_RESEARCH: ResearchService(Provider())})
         result = await service.execute(QueryCommand(
             query="调研我的资料", source_scope=scope, document_ids=ids,
-            allow_web=False, conversation_id="conversation-a", budget={"steps": 3},
+            allow_web=False, conversation_id="conversation-a", budget={"max_steps": 3},
         ))
         events = [event async for event in manager.events(result.run_id)]
         request = seen["request"]
@@ -84,7 +84,8 @@ def test_router_contract_reaches_actual_research_service_runtime(scope, ids):
         assert request.document_ids == tuple(ids)
         assert request.allow_web is False
         assert request.conversation_id == "conversation-a"
-        assert request.budget == {"steps": 3}
+        assert request.budget["max_steps"] == 3
+        assert request.budget["max_tool_calls"] == 240
         assert seen["external"] is False
         snapshot = manager.get(result.run_id)
         assert snapshot.execution == request

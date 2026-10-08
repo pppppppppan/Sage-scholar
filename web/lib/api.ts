@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
 export type Workflow =
   | "direct"
@@ -25,6 +25,7 @@ export interface EvidenceRef {
 }
 
 export interface QueryResponse {
+  conversation_id?: string;
   request_id: string;
   route: {
     workflow: Workflow;
@@ -51,7 +52,7 @@ export interface ChatMessage {
   content: string;
 }
 
-async function expectJson<T>(response: Response): Promise<T> {
+export async function expectJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.text();
     let message = `请求失败 (${response.status})`;
@@ -70,7 +71,7 @@ export async function submitQuery(
   query: string,
   history: ChatMessage[] = [],
   documentIds: string[] = [],
-  memoryContext: { workspace_id?: string; session_id?: string } = {},
+  memoryContext: { workspace_id?: string; session_id?: string; conversation_id?: string; request_id?: string } = {},
 ): Promise<QueryResponse> {
   const response = await fetch(`${API_BASE}/api/queries`, {
     method: "POST",
@@ -135,7 +136,14 @@ export async function uploadFile(file: File): Promise<SaveReportResult> {
   return expectJson<SaveReportResult>(response);
 }
 
+export interface HumanQuestion { interrupt_id: string; question: string; reason: string; options: string[]; allow_skip: boolean }
+
 export type ResearchEvent =
+  | { type: "answer_delta"; text: string }
+  | { type: "answer"; answer: string }
+  | { type: "waiting_for_user"; interrupts: HumanQuestion[] }
+  | { type: "cancel_requested" }
+  | { type: "connection_error"; message: string }
   | { type: "initializing_tools" | "research_started" | "audit_started"; message: string }
   | { type: "audit_claim_checked"; claim: { claim_id: string }; support_status: string; citation_status?: "present" | "missing" }
   | { type: "tool_available" | "tool_unavailable"; server: string; message: string; reason?: string | null }
@@ -191,7 +199,7 @@ export function startRunEvents(
           if (sequence && sequence <= cursor) continue;
           if (type && data) {
             const payload = JSON.parse(data);
-            const isTerminal = ["run_finished", "run_cancelled", "run_interrupted", "error"].includes(type);
+            const isTerminal = ["run_finished", "run_cancelled", "run_interrupted", "error", "waiting_for_user"].includes(type);
             // A resumed run replays its history; old interruption/error events are not its current end.
             if (!isTerminal || !sequence || sequence >= terminalAfter) {
               onEvent({ type, ...payload } as ResearchEvent);
@@ -202,10 +210,10 @@ export function startRunEvents(
           }
         }
       }
-    } catch (error) {
+    } catch {
       if (controller.signal.aborted) return;
       if (retries >= 4) {
-        onEvent({ type: "error", message: error instanceof Error ? error.message : "事件流连接失败，可从任务列表重新查看" });
+        onEvent({ type: "connection_error", message: "连接暂时断开，正在同步任务状态。" });
         return;
       }
     }
@@ -255,12 +263,15 @@ export interface SavedMemory {
 }
 
 export interface SavedRun {
-  execution?: { workspace_id: string; session_id: string | null };
+  execution?: { workspace_id: string; session_id: string | null; conversation_id?: string; document_ids?: string[]; budget?: Record<string, number> };
+  created_at?: string; updated_at?: string;
+  interrupts?: HumanQuestion[];
+  progress?: { message?: string; tasks?: {task_id: string; objective: string; status: string}[] };
   run_id: string;
   workflow: Workflow;
   query: string;
-  status: "pending" | "running" | "cancel_requested" | "completed" | "partial" | "failed" | "cancelled" | "interrupted";
-  result: { report?: string; audit_items?: unknown[] } | null;
+  status: "pending" | "running" | "waiting_for_user" | "cancel_requested" | "completed" | "partial" | "failed" | "cancelled" | "interrupted";
+  result: { report?: string; answer?: string; evidence?: EvidenceRef[]; citations?: Record<string,string>; audit_items?: unknown[] } | null;
   error: string | null;
   reason: string | null;
   remaining_gaps: string[];

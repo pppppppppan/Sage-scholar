@@ -24,6 +24,8 @@ class JournaledTool(BaseTool):
         return self.tool.to_schema()
 
     def run_tool(self, parameters):
+        from sage_scholar.runtime.control import check_control
+        check_control()
         if self.cancelled():
             raise WorkflowInterrupted("任务已停止派发工具")
         key = self.task_key + ":" + hashlib.sha256(json.dumps([self.name, parameters], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -41,7 +43,9 @@ class JournaledTool(BaseTool):
         try:
             result = self.tool.run_tool(parameters)
         except ToolBudgetExceeded as exc:
-            self.store.call_finished(self.run_id, key, {"error": str(exc)})
+            # Dispatch was denied, so there is no ambiguous external side effect to replay.
+            with self.store.transaction() as db:
+                db.execute("DELETE FROM calls WHERE run_id=? AND call_key=?", (self.run_id, key))
             raise
         except WorkflowInterrupted:
             raise

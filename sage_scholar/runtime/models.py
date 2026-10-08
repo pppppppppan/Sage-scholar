@@ -17,6 +17,7 @@ class RunStatus(StrEnum):
     PENDING = "pending"
     CREATED = "pending"
     RUNNING = "running"
+    WAITING_FOR_USER = "waiting_for_user"
     CANCEL_REQUESTED = "cancel_requested"
     CANCELLED = "cancelled"
     COMPLETED = "completed"
@@ -55,6 +56,9 @@ class RunSnapshot(BaseModel):
     error: str | None = None
     execution: ExecutionRequest
     reason: str | None = None
+    progress: dict = Field(default_factory=dict)
+    interrupts: list[dict] = Field(default_factory=list)
+    resume_input: dict = Field(default_factory=dict)
     remaining_gaps: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime

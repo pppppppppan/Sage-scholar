@@ -88,12 +88,21 @@ class MCPClient:
                         self._ready_event.set()
                         while True:
                             name, args, future = await self._queue.get()
+                            if future.cancelled():
+                                continue
+                            operation = asyncio.create_task(session.call_tool(name=name, arguments=args))
+                            def cancelled_call(done, operation=operation):
+                                if done.cancelled() and not self._loop.is_closed():
+                                    self._loop.call_soon_threadsafe(operation.cancel)
+                            future.add_done_callback(cancelled_call)
                             try:
-                                result = await asyncio.wait_for(
-                                    session.call_tool(name=name, arguments=args), self.config.call_timeout,
-                                )
+                                result = await asyncio.wait_for(operation, self.config.call_timeout)
                                 if not future.done():
                                     future.set_result(result)
+                            except asyncio.CancelledError:
+                                if self._main_task.cancelling():
+                                    raise
+                                future.cancel()
                             except Exception as exc:
                                 if not future.done():
                                     future.set_exception(exc)
@@ -112,15 +121,29 @@ class MCPClient:
     def call_tool(self, name: str, args: dict[str, Any], _max_retries: int = 3):
         if self.status != "available" or self._loop is None:
             raise ToolCallError(f"MCP {self.name} unavailable", name)
+        from sage_scholar.runtime.control import check_control
+        from sage_scholar.runtime.journal import WorkflowInterrupted
         for attempt in range(_max_retries + 1):
+            check_control()
             future = Future()
             with self._pending_lock:
                 self._pending.add(future)
             try:
                 self._loop.call_soon_threadsafe(self._queue.put_nowait, (name, args, future))
-                result: CallToolResult = future.result(timeout=self.config.call_timeout + self.config.cleanup_timeout)
+                deadline = time.monotonic() + self.config.call_timeout + self.config.cleanup_timeout
+                while True:
+                    check_control()
+                    try:
+                        result: CallToolResult = future.result(timeout=min(.2, max(.001, deadline - time.monotonic())))
+                        break
+                    except TimeoutError:
+                        if time.monotonic() >= deadline:
+                            raise
+            except WorkflowInterrupted:
+                future.cancel()  # Cancel this request, never the shared MCP server.
+                raise
             except TimeoutError:
-                self.disconnect()
+                future.cancel()
                 raise ToolCallError(f"MCP {self.name} tool call timed out", name) from None
             except Exception as exc:
                 if "already borrowed" in str(exc).lower() and attempt < _max_retries:

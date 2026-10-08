@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+from sage_scholar.runtime.control import cooperative_thread
 import re
 import threading
 from pathlib import Path
@@ -40,7 +40,7 @@ class LegacyRetrievalAdapter:
         ]
 
     async def retrieve(self, query: str, *, policy: SourcePolicy, top_k: int = 5) -> list[EvidenceRef]:
-        return await asyncio.to_thread(self.retrieve_sync, query, policy, top_k)
+        return await cooperative_thread(self.retrieve_sync, query, policy, top_k)
 
     def retrieve_sync(self, query: str, policy: SourcePolicy, top_k: int = 5) -> list[EvidenceRef]:
         docs = {doc.converted_path: doc for doc in self.permitted_documents(policy)}
@@ -66,7 +66,7 @@ class LegacyRetrievalAdapter:
         return list({item.evidence_id: item for item in evidence}.values())
 
     async def read_documents(self, *, policy: SourcePolicy) -> list[EvidenceRef]:
-        return await asyncio.to_thread(self.read_documents_sync, policy)
+        return await cooperative_thread(self.read_documents_sync, policy)
 
     def read_documents_sync(self, policy: SourcePolicy) -> list[EvidenceRef]:
         return [section for doc in self.permitted_documents(policy) for section in self._sections(doc)]

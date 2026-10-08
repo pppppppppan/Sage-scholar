@@ -67,3 +67,15 @@ async def restart_run(run_id: str, container: Container):
         raise HTTPException(404, "run not found") from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+from sage_scholar.runtime.human import HumanResponse
+
+@router.post("/api/runs/{run_id}/respond", response_model=RunResponse)
+async def respond_run(run_id: str, body: HumanResponse, container: Container):
+    try:
+        return RunResponse(run=await container.run_manager.answer(run_id, body))
+    except KeyError as exc:
+        raise HTTPException(404, "run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc

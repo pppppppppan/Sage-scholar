@@ -24,6 +24,13 @@ class RunStore:
         CREATE TABLE IF NOT EXISTS run_evidence (run_id TEXT, evidence_id TEXT, PRIMARY KEY(run_id,evidence_id));
         ''')
         self.conn.commit()
+        columns = {r[1] for r in self.conn.execute('PRAGMA table_info(budget)')}
+        if 'active_seconds' not in columns:
+            self.conn.execute('ALTER TABLE budget ADD COLUMN active_seconds REAL NOT NULL DEFAULT 0')
+        self.conn.execute('CREATE TABLE IF NOT EXISTS model_reservations (run_id TEXT, lease TEXT PRIMARY KEY, tokens INTEGER)')
+        self.conn.commit()
+        from sage_scholar.conversations.store import ConversationStore
+        self.conversations = ConversationStore(self)
 
     @contextmanager
     def transaction(self):
@@ -57,11 +64,12 @@ class RunStore:
         with self.transaction() as db:
             db.execute("INSERT OR REPLACE INTO runs VALUES (?,?)", (snapshot.run_id, snapshot.model_dump_json()))
             db.execute("INSERT INTO events VALUES (?,?,?)", (snapshot.run_id, event.sequence, event.model_dump_json()))
+            self.conversations.record_run(db, snapshot, event)
 
     def budget(self, run_id):
         with self.lock:
-            row = self.conn.execute("SELECT used,denied,blocked,prompt_tokens,completion_tokens FROM budget WHERE run_id=?", (run_id,)).fetchone() or (0,0,0,0,0)
-        return dict(zip(("tool_calls", "denied_calls", "blocked_by_budget", "prompt_tokens", "completion_tokens"), row))
+            row = self.conn.execute("SELECT used,denied,blocked,prompt_tokens,completion_tokens,active_seconds FROM budget WHERE run_id=?", (run_id,)).fetchone() or (0,0,0,0,0,0)
+        return dict(zip(("tool_calls", "denied_calls", "blocked_by_budget", "prompt_tokens", "completion_tokens", "active_seconds"), row))
 
     def reserve(self, run_id, limit):
         with self.transaction() as db:
@@ -120,6 +128,43 @@ class RunStore:
             if mark:
                 db.execute("UPDATE calls SET status='unknown' WHERE run_id=? AND status='started'", (run_id,))
             return [r[0] for r in db.execute("SELECT call_key FROM calls WHERE run_id=? AND status IN ('started','unknown')", (run_id,))]
+
+    def add_seconds(self, run_id, seconds):
+        with self.transaction() as db:
+            db.execute('INSERT OR IGNORE INTO budget(run_id) VALUES (?)', (run_id,))
+            db.execute('UPDATE budget SET active_seconds=active_seconds+? WHERE run_id=?', (seconds, run_id))
+
+    def reserve_model(self, run_id, tokens, limit):
+        from uuid import uuid4
+        with self.transaction() as db:
+            used = self.budget(run_id)
+            reserved = db.execute('SELECT COALESCE(SUM(tokens),0) FROM model_reservations WHERE run_id=?', (run_id,)).fetchone()[0]
+            if used['prompt_tokens'] + used['completion_tokens'] + reserved + tokens > limit:
+                return None
+            lease = uuid4().hex
+            db.execute('INSERT INTO model_reservations VALUES (?,?,?)', (run_id, lease, tokens))
+            return lease
+
+    def release_model(self, run_id, lease):
+        with self.transaction() as db:
+            db.execute('DELETE FROM model_reservations WHERE run_id=? AND lease=?', (run_id, lease))
+
+    def clear_reservations(self, run_id):
+        with self.transaction() as db:
+            reserved = db.execute('SELECT COALESCE(SUM(tokens),0) FROM model_reservations WHERE run_id=?', (run_id,)).fetchone()[0]
+            if reserved:
+                self.record_usage(run_id, reserved, 0)
+            db.execute('DELETE FROM model_reservations WHERE run_id=?', (run_id,))
+
+    def reset_blocked(self, run_id):
+        with self.transaction() as db:
+            db.execute('UPDATE budget SET blocked=0 WHERE run_id=?', (run_id,))
+
+    def purge_run(self, run_id):
+        with self.transaction() as db:
+            for table in ('events','budget','calls','results','run_evidence','model_reservations'):
+                db.execute(f'DELETE FROM {table} WHERE run_id=?', (run_id,))
+            db.execute('DELETE FROM runs WHERE id=?', (run_id,))
 
     def close(self):
         self.conn.close()

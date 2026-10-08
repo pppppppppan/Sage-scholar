@@ -8,6 +8,10 @@ import threading
 from pathlib import Path
 from uuid import uuid4
 from sage_scholar.context.tools import ContextReadTool
+from sage_scholar.runtime.control import check_control
+from sage_scholar.runtime.interaction import assess, resume_command
+from sage_scholar.runtime.human import public_interrupts
+from .continuation import continue_graph
 from sage_scholar.runtime.journal import DurableResearcher, JournaledTool, WorkflowInterrupted
 
 from sage_scholar.agents import Researcher, Supervisor, Writer
@@ -67,6 +71,7 @@ class ResearchRuntime:
                     if client is not None:
                         self.mcp_clients.append(client)
                         register_mcp_tools(self.registry, [client])
+                    check_control()
                     yield {"initialization_node": status}
                 brave = self.registry.tools.get("mcp__brave-search__brave_web_search")
                 tavily = self.registry.tools.get("mcp__tavily__tavily_search")
@@ -181,12 +186,16 @@ class ResearchRuntime:
             gap_reviewer=GapReviewer(review_llm, context),
             verifier=CitationVerifier(review_llm, context), budget=budget,
             checkpointer=self.checkpoints.saver if durable else None,
+            interaction=(lambda req: assess(req, self.llm_client)) if durable else None,
         )
         final_report = None
         graph_config = self.checkpoints.config(request.run_id) if durable else {}
         graph_config["recursion_limit"] = 20 + 3 * contract.limits.max_tasks * (contract.limits.max_rounds + 1)
         snapshot = graph.get_state(graph_config) if durable else None
+        if durable and snapshot:
+            snapshot = continue_graph(graph, graph_config, snapshot, request, contract.limits)
         graph_input = None if snapshot and snapshot.values else {"research_contract": contract}
+        graph_input = resume_command(snapshot, request.metadata.get("_resume_input", {}), graph_input)
         if snapshot and snapshot.values and not snapshot.next:
             final_report = snapshot.values.get("report_result")
             if final_report:
@@ -227,7 +236,9 @@ class ResearchRuntime:
     def to_public_events(event):
         events = []
         for node_name, output in event.items():
-            if node_name == "initialization_node":
+            if node_name == "__interrupt__":
+                events.append(("human_input", {"interrupts": public_interrupts(output)}))
+            elif node_name == "initialization_node":
                 event_type = {"initializing": "initializing_tools", "available": "tool_available",
                               "unavailable": "tool_unavailable", "started": "research_started"}[output["status"]]
                 events.append((event_type, output))

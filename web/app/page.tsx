@@ -1,300 +1,119 @@
 "use client";
-
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import ConversationSidebar from "@/components/ConversationSidebar";
+import RunCard from "@/components/RunCard";
 import WorkspacePanel from "@/components/WorkspacePanel";
-import InlineAnswer from "@/components/InlineAnswer";
 import LibraryDrawer from "@/components/LibraryDrawer";
 import QueryInput from "@/components/QueryInput";
-import ReportView from "@/components/ReportView";
-import ResearchProgress from "@/components/ResearchProgress";
-import StreamingText from "@/components/StreamingText";
-import {
-  submitQuery, getRun, auditReport, type SavedRun,
-  type ChatMessage,
-  type EvidenceRef,
-  type LibraryDoc,
-} from "@/lib/api";
-
-type Stage = "input" | "chat" | "researching" | "report";
-
-interface ChatTurn {
-  id: string;
-  query: string;
-  answer: string | null;
-  evidence: EvidenceRef[];
-  status: "pending" | "done" | "error" | "researching";
-  kind: "inline" | "research";
-}
+import { submitQuery, listDocs, runAction, type LibraryDoc } from "@/lib/api";
+import { conversationUrl, createConversation, getConversation, isActive, type ConversationDetail } from "@/lib/conversations";
 
 export default function Home() {
-  const [workspaceId, setWorkspaceId] = useState("default");
-  const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
+  const [id, setId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<ConversationDetail | null>(null);
+  const [workspace, setWorkspace] = useState("default");
   const [workspaceDraft, setWorkspaceDraft] = useState("default");
-  const [selectedDocuments, setSelectedDocuments] = useState<LibraryDoc[]>([]);
-  const [stage, setStage] = useState<Stage>("input");
-  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [sidebar, setSidebar] = useState(true);
+  const [selected, setSelected] = useState<LibraryDoc[]>([]);
+  const [revision, setRevision] = useState(0);
   const [sending, setSending] = useState(false);
-  const [activeQuery, setActiveQuery] = useState("");
-  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
-  const [runId, setRunId] = useState<string | null>(null);
-  const [report, setReport] = useState("");
-  const [stats, setStats] = useState<{ total_calls: number; total_tokens: number } | null>(null);
-  const [exiting, setExiting] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const [restoredRun, setRestoredRun] = useState(false);
-  const [streamGeneration, setStreamGeneration] = useState(0);
-  const [terminalAfter, setTerminalAfter] = useState(0);
-
-  function openSavedRun(saved: SavedRun) {
-    sessionStorage.setItem("sage-active-run", saved.run_id);
-    if (saved.execution) {
-      setWorkspaceId(saved.execution.workspace_id); setWorkspaceDraft(saved.execution.workspace_id);
-      if (saved.execution.session_id) setSessionId(saved.execution.session_id);
-    }
-    setRunId(saved.run_id); setActiveQuery(saved.query); setActiveTurnId(null);
-    setRestoredRun(true); setStats(null);
-    setStreamGeneration(value => value + 1);
-    setTerminalAfter(saved.event_cursor);
-    const active = ["pending", "running", "cancel_requested"].includes(saved.status);
-    setStage(active ? "researching" : "report");
-    setReport(active ? "" : (saved.result?.report || saved.error || saved.reason || "任务未生成报告。"));
-  }
-
-  useEffect(() => {
-    const stored = sessionStorage.getItem("sage-active-run");
-    let alive = true;
-    if (stored) getRun(stored).then(saved => { if (alive) openSavedRun(saved); }).catch(() => { sessionStorage.removeItem("sage-active-run"); });
-    return () => { alive = false; };
-  }, []);
-
-  useEffect(() => {
-    if (stage === "chat") {
-      chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-    }
-  }, [stage, turns]);
-
-  function conversationHistory(): ChatMessage[] {
-    return turns
-      .filter((turn) => turn.status === "done" && turn.answer)
-      .flatMap<ChatMessage>((turn) => [
-        { role: "user", content: turn.query },
-        { role: "assistant", content: turn.answer! },
-      ]);
-  }
-
-  async function handleQuerySubmit(value: string) {
-    if (sending || stage === "researching") return;
-
-    const history = conversationHistory();
-    const turnId = crypto.randomUUID();
-    const nextTurn: ChatTurn = {
-      id: turnId,
-      query: value,
-      answer: null,
-      evidence: [],
-      status: "pending",
-      kind: "inline",
-    };
-
-    setTurns((previous) => [...previous, nextTurn]);
-    setActiveQuery(value);
-    setActiveTurnId(turnId);
-    setReport("");
-    setStats(null);
-    setStage("chat");
-    setSending(true);
-
+  const [error, setError] = useState("");
+  const activeId = useRef<string | null>(null);
+  const epoch = useRef(0);
+  const scroll = useRef<HTMLDivElement>(null);
+  const follow = useRef(true);
+  const pendingSubmission = useRef<{ query: string; id: string; conversation: string } | null>(null);
+  const refresh = useCallback(async () => {
+    const current = activeId.current;
+    if (!current) return;
+    const version = ++epoch.current;
     try {
-      setRestoredRun(false); setTerminalAfter(0);
-      const response = await submitQuery(value, history, selectedDocuments.map((doc) => doc.document_id), { workspace_id: workspaceId, session_id: sessionId });
-      if (response.status === "accepted" && response.run_id) {
-        setTurns((previous) =>
-          previous.map((turn) =>
-            turn.id === turnId
-              ? { ...turn, kind: "research", status: "researching" }
-              : turn,
-          ),
-        );
-        sessionStorage.setItem("sage-active-run", response.run_id);
-        setRunId(response.run_id);
-        setStage("researching");
-        return;
-      }
-
-      const answer = response.answer || response.message || "当前请求暂时无法处理。";
-      setTurns((previous) =>
-        previous.map((turn) =>
-          turn.id === turnId
-            ? {
-                ...turn,
-                answer,
-                evidence: response.evidence || [],
-                status: "done",
-              }
-            : turn,
-        ),
-      );
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "请求失败";
-      setTurns((previous) =>
-        previous.map((turn) =>
-          turn.id === turnId
-            ? { ...turn, answer: `错误：${message}`, status: "error" }
-            : turn,
-        ),
-      );
-    } finally {
-      setSending(false);
+      const data = await getConversation(current);
+      if (activeId.current !== current || version !== epoch.current) return;
+      setDetail(data); setWorkspace(data.conversation.workspace_id); setWorkspaceDraft(data.conversation.workspace_id);
+      if (follow.current) requestAnimationFrame(() => scroll.current?.scrollTo({ top: scroll.current.scrollHeight }));
+    } catch (e) { if (activeId.current === current) setError(e instanceof Error ? e.message : "加载失败"); }
+  }, []);
+  const navigate = useCallback((next: string | null, push = true) => {
+    activeId.current = next; epoch.current++; follow.current = true;
+    setId(next); setDetail(null); setSelected([]); setError(""); pendingSubmission.current = null;
+    if (push) window.history.pushState(null, "", conversationUrl(next));
+    if (next) localStorage.setItem("sage-conversation", next); else localStorage.removeItem("sage-conversation");
+    void refresh();
+    if (next) {
+      void Promise.all([getConversation(next), listDocs()]).then(([data, docs]) => {
+        if (activeId.current !== next) return;
+        const ids = data.runs.at(-1)?.execution?.document_ids || [];
+        setSelected(docs.filter(doc => ids.includes(doc.document_id)));
+      }).catch(() => {});
     }
+  }, [refresh]);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const restored = url.searchParams.get("conversation") || localStorage.getItem("sage-conversation");
+    if (restored) window.history.replaceState(null, "", conversationUrl(restored));
+    const timer = setTimeout(() => navigate(restored, false), 0);
+    const back = () => navigate(new URL(window.location.href).searchParams.get("conversation"), false);
+    window.addEventListener("popstate", back);
+    return () => { clearTimeout(timer); window.removeEventListener("popstate", back); };
+  }, [navigate]);
+  const active = detail?.runs.find(r => isActive(r) || r.status === "waiting_for_user");
+  async function newConversation() {
+    try { const c = await createConversation(workspace); navigate(c.conversation_id); setRevision(v => v + 1); }
+    catch (e) { setError(e instanceof Error ? e.message : "新建失败"); }
   }
-
-  function handleResearchReport(value: string, usage: { total_calls: number; total_tokens: number } | null) {
-    setReport(value);
-    if (usage) setStats(usage);
-    if (activeTurnId) {
-      setTurns((previous) =>
-        previous.map((turn) =>
-          turn.id === activeTurnId
-            ? { ...turn, answer: value, status: "done", kind: "research" }
-            : turn,
-        ),
-      );
-    }
-    setStage("report");
+  async function submit(query: string) {
+    if (sending || active) return;
+    setSending(true); setError("");
+    try {
+      let current = activeId.current;
+      if (!current) { const c = await createConversation(workspace); current = c.conversation_id; navigate(current); }
+      const pending = pendingSubmission.current;
+      const requestId = pending?.query === query && pending.conversation === current ? pending.id : crypto.randomUUID();
+      pendingSubmission.current = { id: requestId, query, conversation: current };
+      const response = await submitQuery(query, [], selected.map(d => d.document_id), {
+        workspace_id: workspace, conversation_id: current, request_id: requestId,
+      });
+      pendingSubmission.current = null;
+      if (response.status !== "accepted") setError(response.message || "当前功能尚未实现");
+      if (activeId.current === current) await refresh();
+      setRevision(v => v + 1);
+    } catch (e) { setError(e instanceof Error ? e.message : "发送失败，请重试；相同请求不会重复执行。"); }
+    finally { setSending(false); }
   }
-
-  function handleNewConversation() {
-    sessionStorage.removeItem("sage-active-run");
-    setSessionId(crypto.randomUUID());
-    setRestoredRun(false);
-    setExiting(true);
-    setTimeout(() => {
-      setStage("input");
-      setTurns([]);
-      setSelectedDocuments([]);
-      setSending(false);
-      setActiveQuery("");
-      setActiveTurnId(null);
-      setRunId(null);
-      setReport("");
-      setStats(null);
-      setExiting(false);
-    }, 250);
-  }
-
-  const isReport = stage === "report";
-
-  return (
-    <>
-      <WorkspacePanel onRun={openSavedRun} messages={conversationHistory()} workspaceId={workspaceId} sessionId={sessionId} />
-      <div className="fixed left-5 bottom-5 z-40 flex gap-2 rounded-lg bg-surface border border-border p-2 text-xs">
-        <input aria-label="记忆工作区" className="w-28 bg-transparent" value={workspaceDraft} onChange={e => setWorkspaceDraft(e.target.value)} />
-        <button disabled={sending || stage === "researching" || !workspaceDraft.trim() || workspaceDraft.trim() === workspaceId}
-          onClick={() => { setWorkspaceId(workspaceDraft.trim()); handleNewConversation(); }}>切换工作区</button>
-      </div>
-      <LibraryDrawer selectedDocuments={selectedDocuments} onSelectionChange={setSelectedDocuments} />
-      {selectedDocuments.length > 0 && (
-        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-2 text-sm text-muted-foreground">
-          <span>本次资料：{selectedDocuments.map((doc) => doc.title).join("、")}</span>
-          <button onClick={() => setSelectedDocuments([])} className="shrink-0 underline">清除选择</button>
-        </div>
-      )}
-      {stage === "input" && (
-        <>
-          <div className="flex flex-1 flex-col items-center px-4">
-            <HeroSection onSubmit={handleQuerySubmit} />
-          </div>
-        </>
-      )}
-
-      {stage !== "input" && (
-        <div className={`relative flex min-h-0 w-full flex-1 overflow-hidden ${exiting ? "back-exit" : ""}`}>
-          <div className="transition-[flex] duration-700" style={{ flex: isReport ? "0 0 0px" : "1 1 0px" }} />
-          <div className="chat-scrollbar min-h-0 w-full max-w-3xl shrink-0 overflow-y-scroll px-4" data-scroll-container>
-            <div
-              className="sticky top-0 z-10 -mx-4 flex h-[58px] items-start px-4"
-              style={{ background: "linear-gradient(to bottom, var(--background) 62%, transparent)" }}
-            >
-              <button onClick={handleNewConversation} className="mt-4 text-[13px] text-muted-foreground hover:text-foreground">
-                ＋ 新对话
-              </button>
-            </div>
-
-            {stage === "chat" ? (
-              <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 pb-4">
-                {turns.map((turn) => (
-                  <div key={turn.id} className="flex flex-col gap-3 bubble-enter">
-                    <div className="ml-auto max-w-[85%] rounded-2xl bg-foreground/[0.06] px-5 py-3 text-sm text-foreground/80">
-                      {turn.query}
-                    </div>
-                    {turn.status === "pending" ? (
-                      <div className="w-full rounded-2xl border border-foreground/10 bg-surface px-5 py-4 text-sm text-muted-foreground">
-                        <StreamingText text="正在回答" mode="dots" />
-                      </div>
-                    ) : turn.kind === "research" ? (
-                      <div className="w-full rounded-2xl border border-foreground/10 bg-surface px-5 py-4 text-sm text-foreground/70">
-                        深度调研已完成，报告内容已加入本轮对话上下文。
-                      </div>
-                    ) : (
-                      <InlineAnswer answer={turn.answer || ""} evidence={turn.evidence} />
-                    )}
-                  </div>
-                ))}
-                <div ref={chatEndRef} />
-                <div className="sticky bottom-0 bg-gradient-to-t from-background from-80% to-transparent pb-5 pt-4">
-                  <QueryInput onSubmit={handleQuerySubmit} disabled={sending} />
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-4 pb-8">
-                <div className="w-full max-w-3xl rounded-2xl bg-foreground/[0.04] px-5 py-3 text-sm text-foreground/75">
-                  {activeQuery}
-                </div>
-                {runId && !(restoredRun && isReport) && (
-                  <ResearchProgress key={`${runId}-${streamGeneration}`} terminalAfter={terminalAfter} runId={runId} onReport={handleResearchReport} />
-                )}
-                {isReport && (
-                  <div className="sticky bottom-0 w-full max-w-2xl bg-gradient-to-t from-background from-80% to-transparent pb-2 pt-5">
-                    <QueryInput onSubmit={handleQuerySubmit} />
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div
-            data-report-panel
-            className={`thin-scroll min-h-0 min-w-0 flex-1 overflow-y-auto transition-opacity duration-500 ${isReport ? "border-l border-foreground/8 bg-surface/40 opacity-100" : "pointer-events-none opacity-0"}`}
-          >
-            {report && <>
-              {runId && <button className="m-4 text-sm underline" onClick={async () => {
-                try { openSavedRun(await auditReport(runId)); }
-                catch (e) { setReport(report + `\n\n核验启动失败：${e instanceof Error ? e.message : "请求失败"}`); }
-              }}>核验这份报告的引用</button>}
-              <ReportView report={report} stats={stats} />
-            </>}
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-function HeroSection({ onSubmit }: { onSubmit: (query: string) => void }) {
-  const [showSubtitle, setShowSubtitle] = useState(false);
-  return (
-    <div className="flex w-full flex-1 flex-col items-center">
-      <div className="flex flex-1 flex-col items-center justify-center">
-        <h1 className="w-full text-center text-4xl font-medium">
-          <StreamingText text="SAGE Scholar" mode="typewriter" speed="slow" pause={350} onComplete={() => setShowSubtitle(true)} />
-        </h1>
-        <div className={`w-full overflow-hidden transition-all duration-1000 ${showSubtitle ? "mt-3 max-h-16 opacity-100" : "mt-0 max-h-0 opacity-0"}`}>
-          <p className="text-center text-lg tracking-wide text-foreground/65">简单问题直接回答，复杂问题深入研究。</p>
+  function changed() { void refresh(); setRevision(v => v + 1); }
+  return <div className="flex min-h-0 w-full flex-1 overflow-hidden">
+    {sidebar && <ConversationSidebar active={id} workspace={workspace} revision={revision} onSelect={navigate}
+      onNew={() => void newConversation()} onChange={changed} onDeleted={deleted => { if (deleted === activeId.current) navigate(null); }} />}
+    <main className="flex min-w-0 flex-1 flex-col">
+      <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border px-4 pr-24">
+        <button aria-label="展开或收起历史对话" aria-expanded={sidebar} onClick={() => setSidebar(value => !value)}>☰</button>
+        <button onClick={() => navigate(null)}>首页</button><button onClick={() => void newConversation()}>＋ 新对话</button>
+        <span className="truncate text-sm text-muted-foreground">{detail?.conversation.title || "SAGE Scholar"}</span>
+      </header>
+      <div ref={scroll} data-scroll-container className="chat-scrollbar min-h-0 flex-1 overflow-y-scroll px-4" onScroll={() => {
+        const node = scroll.current; if (node) follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120;
+      }}>
+        <div className="mx-auto flex max-w-3xl flex-col gap-6 py-8">
+          {!id && <div className="py-20 text-center"><h1 className="text-4xl font-medium">SAGE Scholar</h1><p className="mt-4 text-muted-foreground">简单问题直接回答，复杂问题深入研究。</p></div>}
+          {id && !detail && <p className="text-muted-foreground">正在恢复对话…</p>}
+          {detail?.messages.map(message => message.role === "user" ? <div key={message.message_id} className="ml-auto max-w-[85%] whitespace-pre-wrap rounded-2xl bg-foreground/6 px-5 py-3 text-sm">{message.content}</div> : (() => {
+            const run = detail.runs.find(r => r.run_id === message.run_id);
+            return run ? <RunCard key={message.message_id} run={run} refresh={changed} archived={detail.conversation.archived} /> : null;
+          })())}
         </div>
       </div>
-      <div className="flex w-full justify-center pb-8">
-        <QueryInput onSubmit={onSubmit} />
-      </div>
-    </div>
-  );
+      <footer className="mx-auto flex w-full max-w-3xl shrink-0 flex-col items-center gap-2 px-4 pt-2 pb-6">
+        {error && <p role="alert" className="w-full whitespace-pre-wrap text-sm text-error">{error}</p>}
+        {!!selected.length && <p className="w-full text-xs text-muted-foreground">本次资料：{selected.map(d => d.title).join("、")} <button onClick={() => setSelected([])}>清除</button></p>}
+        {detail?.conversation.archived ? <p className="py-6 text-sm text-muted-foreground">对话已归档。在左侧恢复后可继续。</p> : <QueryInput key={id || "new"} onSubmit={submit} disabled={sending || !!active} stopping={active?.status === "cancel_requested"}
+          onStop={active ? () => { void runAction(active.run_id, "cancel").then(changed).catch(e => setError(e.message)); } : undefined} />}
+        {active?.status === "waiting_for_user" && <p className="text-xs text-muted-foreground">请在上方卡片中回答，或停止任务后发送新消息。</p>}
+        <div className="flex gap-2 self-start text-xs text-muted-foreground"><input aria-label="工作区" className="w-28 bg-transparent" value={workspaceDraft} onChange={e => setWorkspaceDraft(e.target.value)} />
+          <button disabled={!workspaceDraft.trim() || workspaceDraft.trim() === workspace} onClick={() => { setWorkspace(workspaceDraft.trim()); navigate(null); }}>切换工作区</button></div>
+      </footer>
+    </main>
+    <LibraryDrawer selectedDocuments={selected} onSelectionChange={setSelected} />
+    <WorkspacePanel messages={detail?.messages.filter(m => m.content) || []} workspaceId={workspace} sessionId={id || ""} />
+  </div>;
 }

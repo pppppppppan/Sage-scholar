@@ -8,9 +8,9 @@ router = APIRouter()
 @router.post("/api/queries", response_model=QueryResponse)
 async def submit_query(body: QueryRequest, response: Response, container: Container):
     try:
-        result = await container.query_service.execute(
+        result = await (container.conversations.submit if hasattr(container, "conversations") else container.query_service.execute)(
             QueryCommand(
-                query=body.query,
+                query=body.query, request_id=body.request_id,
                 workflow=body.workflow,
                 source_scope=body.source_scope,
                 document_ids=body.document_ids,
@@ -21,11 +21,14 @@ async def submit_query(body: QueryRequest, response: Response, container: Contai
                 budget=body.budget, metadata=body.metadata,
             )
         )
+    except KeyError as exc:
+        raise HTTPException(404, detail="conversation not found") from exc
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     if result.run_id:
         response.status_code = status.HTTP_202_ACCEPTED
     return QueryResponse(
+        conversation_id=container.run_manager.get(result.run_id).execution.conversation_id if result.run_id else body.conversation_id,
         request_id=result.request_id,
         route=result.route,
         status=result.status.value,

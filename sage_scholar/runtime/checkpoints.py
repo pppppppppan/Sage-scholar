@@ -40,5 +40,12 @@ class Checkpoints:
         except Exception:
             return False
 
+    def pending_interrupts(self, run_id):
+        item = self.saver.get_tuple(self.config(run_id))
+        return [value for _, channel, values in (item.pending_writes or []) if channel == "__interrupt__" for value in values] if item else []
+
+    def delete(self, run_id):
+        self.saver.delete_thread(run_id)
+
     def close(self):
         self.conn.close()

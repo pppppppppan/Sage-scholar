@@ -31,6 +31,7 @@ class ApplicationContainer:
         self.config = config or Config()
         self.memory_store = MemoryStore(self.config.data_dir)
         self.run_store = RunStore(self.config.data_dir)
+        self.run_store.conversations.adopt_existing_runs()
         self.checkpoints = Checkpoints(self.config.data_dir)
         self.context_manager = ContextManager(self.config.data_dir, max_tokens=self.config.context.max_tokens,
             reserve_ratio=self.config.context.reserve_ratio)
@@ -75,6 +76,11 @@ class ApplicationContainer:
             memory_store=self.memory_service,
             memory_background=self.memory_background,
         )
+
+        self.runners.update({Workflow.DIRECT: self.query_service.inline_runner, Workflow.QA: self.query_service.inline_runner})
+        from sage_scholar.conversations.service import ConversationService
+        self.conversations = ConversationService(self.run_store.conversations, self.run_manager,
+            self.query_service, self.memory_background)
 
     async def close(self) -> None:
         await self.run_manager.shutdown()

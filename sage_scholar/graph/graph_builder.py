@@ -38,6 +38,9 @@ class State(TypedDict):
     planning_exhausted: bool
     report_result: ResearchReport
     final_report: str
+    human_question: dict | None
+    human_answer: dict | None
+    continuation_generation: int
 
 
 class InputSchema(TypedDict):
@@ -52,8 +55,31 @@ class OutputSchema(TypedDict):
     blocked_by_budget: bool
 
 
-def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier, budget=None, checkpointer=None):
+def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier, budget=None, checkpointer=None, interaction=None):
     builder = StateGraph(State, input_schema=InputSchema, output_schema=OutputSchema)
+
+    def assess_node(state):
+        return {"human_question": interaction(state["research_contract"].execution) if interaction else None}
+
+    def human_node(state):
+        from sage_scholar.runtime.interaction import ask
+        answer = ask(state.get("human_question"))
+        if not answer:
+            return {}
+        contract = state["research_contract"]
+        clarification = "用户补充决定：" + (answer.get("answer") or "跳过问题，由研究员自主确定")
+        execution = contract.execution.model_copy(update={"query": contract.execution.query + "\n" + clarification})
+        return {"human_answer": answer, "research_contract": contract.model_copy(update={
+            "execution": execution, "objective": contract.objective + "\n" + clarification,
+            "constraints": [*contract.constraints, clarification]})}
+
+    def continuation_node(state):
+        return {}
+
+    def continuation_route(state):
+        if any(t.status == "pending" for t in state.get("tasks", {}).values()):
+            return "dispatch_node"
+        return "plan_node" if state.get("gap_review") and state["gap_review"].next_tasks else "review_node"
 
     def notes(state):
         return [note for note in state.get("research_notes", {}).values() if note is not None]
@@ -76,6 +102,8 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier
                 # Dropping dependent tasks silently would corrupt the plan.
                 raise ValueError("计划超过 max_tasks 限制")
             return {"tasks": tasks, "task_gaps": [] if tasks else ["Planner 未产生任务"]}
+        except WorkflowInterrupted:
+            raise
         except Exception as exc:
             return {"tasks": {}, "task_gaps": [f"任务规划失败：{exc}"], "planning_exhausted": True}
 
@@ -155,6 +183,8 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier
         try:
             draft = writer.run(state["research_contract"], notes(state),
                                previous=previous, verification=state.get("verification_result"))
+        except WorkflowInterrupted:
+            raise
         except Exception as exc:
             draft_gaps.append(f"Writer 生成或修订失败：{exc}")
             # Preserve the last draft; otherwise verify only actual note findings.
@@ -176,6 +206,8 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier
         get_stream_writer()({"progress_node": {"event": "citation_verifying", "phase": "started"}})
         try:
             verification = verifier.verify(state["draft"])
+        except WorkflowInterrupted:
+            raise
         except Exception as exc:
             verification = VerificationResult(claims=[
                 ClaimVerification(claim_id=claim.claim_id, status="uncertain", reason=str(exc),
@@ -219,8 +251,18 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier
         ("review_node", review_node), ("write_node", write_node), ("verify_node", verify_node),
         ("revision_node", revision_node), ("render_node", render_node),
     ]:
-        builder.add_node(name, node)
-    builder.add_edge(START, "plan_node")
+        def checked(state, fn=node):
+            from sage_scholar.runtime.control import check_control
+            check_control()
+            return fn(state)
+        builder.add_node(name, checked)
+    builder.add_node("assess_node", assess_node)
+    builder.add_node("human_node", human_node)
+    builder.add_node("continuation_node", continuation_node)
+    builder.add_conditional_edges("continuation_node", continuation_route)
+    builder.add_edge(START, "assess_node")
+    builder.add_edge("assess_node", "human_node")
+    builder.add_edge("human_node", "plan_node")
     builder.add_edge("plan_node", "dispatch_node")
     builder.add_conditional_edges("dispatch_node", dispatch_route, ["research_node", "review_node"])
     builder.add_edge("research_node", "dispatch_node")

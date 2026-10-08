@@ -128,6 +128,8 @@ class LLMClient:
         max_tokens: int = 4096,
         tag: str = "",
     ) -> ChatCompletionMessage:
+        from sage_scholar.runtime.control import check_control, CURRENT_CONTROL
+        check_control()
         if self.context_manager is None:
             from sage_scholar.config import Config
             from sage_scholar.context.manager import ContextManager
@@ -142,30 +144,30 @@ class LLMClient:
                                                  summary_mode=tag == "context:compress")
         messages = prepared.messages
         logger.info("[Context:%s] %s", tag, prepared.accounting)
-        if self._is_claude:
-            return self._invoke_claude(
-                messages, temperature, tools, tool_choice, max_tokens, tag
-            )
-
-        start = time.time()
-        response = self.client.chat.completions.create(
-            messages=messages,
-            model=self.model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            tool_choice=tool_choice,
-            tools=tools if tools else None,
-            extra_body=self.extra_body,
-        )
-        elapsed = time.time() - start
-
-        msg = response.choices[0].message
-        self._track_usage(
-            response.usage.prompt_tokens,
-            response.usage.completion_tokens,
-            elapsed, tag, msg,
-        )
-        return msg
+        control = CURRENT_CONTROL.get()
+        lease = control.reserve_model(prepared.accounting["total_tokens"]) if control else None
+        try:
+            check_control()
+            if self._is_claude:
+                result = self._invoke_claude(messages, temperature, tools, tool_choice, max_tokens, tag)
+            else:
+                client = self.client.with_options(max_retries=0) if control else self.client
+                kwargs = dict(messages=messages, model=self.model, temperature=temperature,
+                    max_tokens=max_tokens, tool_choice=tool_choice, tools=tools if tools else None, extra_body=self.extra_body)
+                if control and control.emit and not tools and tag in {"direct", "qa"}:
+                    from sage_scholar.runtime.streaming import openai_text
+                    result = openai_text(client, kwargs, control, self._track_usage, tag)
+                else:
+                    start = time.time()
+                    response = client.chat.completions.create(**kwargs)
+                    result = response.choices[0].message
+                    self._track_usage(response.usage.prompt_tokens, response.usage.completion_tokens,
+                        time.time() - start, tag, result)
+            check_control()
+            return result
+        finally:
+            if control:
+                control.release_model(lease)
 
     def summarize_history(self, previous, batch, budget):
         """Use this exact provider/client and its usage ledger; never recursively summarize itself."""

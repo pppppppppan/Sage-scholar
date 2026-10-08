@@ -18,6 +18,7 @@ class MemoryBackground:
     def __init__(self, service, retrieval, jobs, checkpoints=None):
         self.service, self.jobs = service, jobs
         self.source = ResearchMemorySource(jobs.db, retrieval, checkpoints)
+        self.commit_lock = threading.Lock()
         self.worker = None
         self.closing = threading.Event()
         self.wakeup = asyncio.Event()
@@ -64,7 +65,15 @@ class MemoryBackground:
         except Exception:
             logger.exception('Could not persist memory extraction job; main response retained')
 
+    async def cancel_conversation(self, identity):
+        def cancel():
+            with self.commit_lock:
+                self.jobs.cancel_conversation(identity)
+        await asyncio.to_thread(cancel)
+
     def completed(self, run, events):
+        if str(run.workflow) in {'direct', 'qa'} and run.result:
+            self.conversation(run.execution, run.result.get('answer', ''), started_at=run.created_at)
         if str(run.workflow) == 'deep_research' and str(run.status) in {'completed','partial'}:
             try:
                 self.enqueue_research(run.run_id)
@@ -89,7 +98,12 @@ class MemoryBackground:
             prepared = [c.model_dump(mode='json') for c in candidates]
             self.jobs.prepare(job['job_id'], prepared)
         candidates = [MemoryCandidate.model_validate(c) for c in prepared]
-        self.service.commit_candidates(candidates, batch_id=job['job_id'], cancelled=self.closing.is_set)
+        def cancelled():
+            return self.closing.is_set() or self.jobs.db.conversations.source_deleted(job['session_id'])
+        with self.commit_lock:
+            if cancelled():
+                raise InterruptedError('Memory source deleted or worker stopping')
+            self.service.commit_candidates(candidates, batch_id=job['job_id'], cancelled=cancelled)
 
     async def _work(self):
         while not self.closing.is_set():

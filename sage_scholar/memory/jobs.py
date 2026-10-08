@@ -31,6 +31,8 @@ class MemoryJobStore:
         return data
 
     def enqueue(self, source_type, source_id, workspace_id, session_id, payload, source_time, *, retry=False):
+        if self.db.conversations.source_deleted(session_id):
+            raise ValueError("已删除对话不能重新抽取记忆")
         key = json.dumps([source_type, source_id, workspace_id, session_id], ensure_ascii=False)
         job_id = 'mj_' + hashlib.sha256(key.encode()).hexdigest()
         now = utc_now().isoformat()
@@ -56,8 +58,13 @@ class MemoryJobStore:
                 (workspace_id,session_id,session_id,limit)).fetchall()
             return [self._decode(row) for row in rows]
 
+    def cancel_conversation(self, identity):
+        with self.db.transaction() as db:
+            db.execute("UPDATE memory_jobs SET status='cancelled',payload='{}',prepared=NULL,error=NULL WHERE session_id=?", (identity,))
+
     def recover(self):
         with self.db.transaction() as db:
+            db.execute("UPDATE memory_jobs SET status='cancelled',payload='{}',prepared=NULL WHERE session_id IN (SELECT id FROM conversations WHERE deleted_at IS NOT NULL)")
             db.execute("UPDATE memory_jobs SET status='pending', available_at=0, updated_at=? WHERE status='running'", (utc_now().isoformat(),))
 
     def claim(self):
@@ -75,15 +82,17 @@ class MemoryJobStore:
 
     def prepare(self, identity, candidates):
         with self.db.transaction() as db:
-            db.execute('UPDATE memory_jobs SET prepared=?,updated_at=? WHERE job_id=? AND prepared IS NULL',
+            db.execute("UPDATE memory_jobs SET prepared=?,updated_at=? WHERE job_id=? AND prepared IS NULL AND status='running'",
                 (json.dumps(candidates,ensure_ascii=False),utc_now().isoformat(),identity))
 
     def succeed(self, identity):
         with self.db.transaction() as db:
-            db.execute("UPDATE memory_jobs SET status='succeeded',error=NULL,updated_at=? WHERE job_id=?", (utc_now().isoformat(),identity))
+            db.execute("UPDATE memory_jobs SET status='succeeded',error=NULL,updated_at=? WHERE job_id=? AND status='running'", (utc_now().isoformat(),identity))
 
     def fail(self, identity, error):
         with self.db.transaction() as db:
+            if self.get(identity)['status'] == 'cancelled':
+                return
             attempts = db.execute('SELECT attempts FROM memory_jobs WHERE job_id=?', (identity,)).fetchone()[0]
             status = 'failed' if attempts >= self.MAX_ATTEMPTS else 'retryable'
             db.execute('UPDATE memory_jobs SET status=?,error=?,available_at=?,updated_at=? WHERE job_id=?',

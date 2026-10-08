@@ -70,5 +70,7 @@ class BudgetedTool(BaseTool):
         return self._tool.to_schema()
 
     def run_tool(self, parameters):
+        from sage_scholar.runtime.control import check_control
+        check_control()
         self._budget.reserve()
         return self._tool.run_tool(parameters)

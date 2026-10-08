@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+from sage_scholar.runtime.control import cooperative_thread
 import threading
 
 from sage_scholar.base import LLMClient
@@ -38,7 +38,7 @@ class LegacyModelGateway:
         temperature: float = 0,
         tag: str = "",
     ) -> str:
-        response = await asyncio.to_thread(
+        response = await cooperative_thread(
             self.client.invoke,
             messages,
             temperature,

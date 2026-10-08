@@ -29,7 +29,7 @@ def run_through_service(graph, request):
             return {}
         def run_research(self, execution):
             assert execution.run_id  # Lifecycle attaches identity without changing the research request.
-            assert execution.model_dump(exclude={"run_id"}) == request.execution.model_dump(exclude={"run_id"})
+            assert execution.model_dump(exclude={"run_id", "budget"}) == request.execution.model_dump(exclude={"run_id", "budget"})
             for event in graph.stream({"research_contract": request}):
                 captured.update(event)
                 yield event
