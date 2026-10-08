@@ -248,3 +248,31 @@ npm --prefix web run build
 - Deep Research 默认每个研究员 12 步，Run 最多 240 次工具调用、200 万模型 token、3600 秒活动执行时间；与单次 Context 窗口独立。可通过 `SAGE_DEEP_RESEARCH_MAX_TOOL_CALLS`、`SAGE_DEEP_RESEARCH_MAX_TOTAL_TOKENS`、`SAGE_DEEP_RESEARCH_MAX_SECONDS` 等配置，有硬上限。
 - partial 的“继续研究”沿用 run ID、证据、已完成笔记和累计消耗，并在硬上限内追加执行预算。没有兼容 checkpoint 或存在未确认外部调用时，要求明确重新开始，不承诺 exactly-once。
 - 删除先留下对话 tombstone，再取消并等待关联 Run 收尾，删除消息、Run journal、事件和 checkpoint，取消未完成的记忆抽取。文献、Evidence 与已经保存的长期记忆属于科研工作区，保留并可单独管理。
+
+### Fetch / Tavily 代理检查
+
+当前 `configs/mcp_servers.json` 为 Fetch、Tavily 显式配置 HTTP 代理
+`http://127.0.0.1:7897`，同时设置大小写代理变量，避免父进程中旧变量优先匹配。
+Fetch 另使用官方 `--proxy-url` 参数。两者清空遗留 `ALL_PROXY/all_proxy`，本机地址不走代理；保留 TLS 验证和 robots.txt 检查。
+此配置需要本机代理软件监听 7897。换端口或停用代理时应同步修改这两个服务的配置。
+
+在项目根目录、已激活 Python 环境的终端中执行：
+
+```bash
+python -m sage_scholar.mcp.check --server fetch
+python -m sage_scholar.mcp.check --server tavily
+```
+
+每个命令均使用项目的 MCP loader，先检查代理端口，再初始化对应服务并实际调用工具。
+看到 `[PASS] fetch` 和 `[PASS] tavily_search` 才表示调用成功，只有“初始化成功”不足以证明外网可达。
+检查不调用大模型；Tavily 检查会消耗一次搜索 API 调用，需要 `.env` 中有效的 `TAVILY_API_KEY`。
+如果仍报 robots/TLS 连接错误，需要检查代理节点到 arXiv/Tavily 的连接；401/403 等错误需另行区分密钥、权限或访问限制。
+修改配置后必须停止并重新启动后端，已有 MCP 子进程不会自动更新代理。
+
+### 研究 token 与输入缓存
+
+- 提示词前缀保留稳定的指令、资料权限和预算配置；实时消耗不再注入 prompt，动态缺口和召回 Memory 放在后部。原有压缩、工具配对、来源回读与 Memory/Evidence 边界保持不变。
+- 同一研究员重复的成功工具调用复用结果；连续失败或重复无进展时结束该子任务。每个子题最多一次自动补查，每轮最多四个补查任务；没有新增证据/覆盖维度时停止重复研究，未解决项仍进入报告。
+- 默认从 200 万 Run token 中预留 50 万用于笔记、报告和核验，可设置 `SAGE_DEEP_RESEARCH_REPORT_RESERVE_TOKENS=500000`（最多占总预算一半）。这是收集阶段的停止边界，不能保证所有规模的报告都能完成；硬上限仍生效。
+- Run 卡片显示服务商实际返回的输入缓存命中率；未上报的调用不计入分母。日志中的 `input_cache=unreported` 表示未知，不能当作零命中。缓存输入仍计入累计 token，缓存主要降低输入费用/延迟，实际命中率取决于服务商与请求前缀。
+- 重启后新建一次调研，观察累计 token、输入缓存和剩余缺口。旧 Run 的历史消耗不会清零；旧调用没有缓存指标，无法补算。

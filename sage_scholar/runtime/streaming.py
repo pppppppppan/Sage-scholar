@@ -1,6 +1,7 @@
 """Incremental text delivery without changing the shared model client lifetime."""
 import time
 from openai.types.chat import ChatCompletionMessage
+from sage_scholar.base.cache_usage import cached_input
 
 
 def openai_text(client, kwargs, control, track, tag):
@@ -25,5 +26,5 @@ def openai_text(client, kwargs, control, track, tag):
         count_tokens = TokenCounter().count
         prompt = usage.prompt_tokens if usage else count_tokens(str(kwargs["messages"]))
         completion = usage.completion_tokens if usage else count_tokens(msg.content)
-        track(prompt, completion, time.monotonic() - start, tag, msg)
+        track(prompt, completion, time.monotonic() - start, tag, msg, cached_tokens=cached_input(usage))
     return msg

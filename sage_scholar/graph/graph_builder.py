@@ -5,6 +5,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.config import get_stream_writer
 from langgraph.types import Send
 from sage_scholar.runtime.journal import WorkflowInterrupted
+from sage_scholar.runtime.control import CURRENT_CONTROL, RunBudgetExceeded
 
 from sage_scholar.domain.research import (
     Claim, ClaimVerification, GapReview, ReportDraft, ResearchContract, ResearchNote,
@@ -40,6 +41,8 @@ class State(TypedDict):
     final_report: str
     human_question: dict | None
     human_answer: dict | None
+    reviewed_evidence_ids: list[str]
+    reviewed_dimensions: list[str]
     continuation_generation: int
 
 
@@ -112,6 +115,10 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier
         completed = {key for key, task in tasks.items() if task.status == "completed"}
         ready = [key for key, task in tasks.items()
                  if task.status == "pending" and set(task.dependencies) <= completed]
+        control = CURRENT_CONTROL.get()
+        model_exhausted = bool(control and control.research_exhausted())
+        if model_exhausted:
+            ready = []
         if ready and budget and budget.exhausted:
             budget.mark_blocked()
             ready = []
@@ -162,7 +169,20 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier
         if budget and budget.blocked_by_budget:
             review.missing.append("工具调用预算已耗尽")
             review.missing.append("预算已阻断必要工具调用或后续研究")
+        identities = sorted({identity for note in current_notes for identity in note.evidence_ids})
+        control = CURRENT_CONTROL.get()
+        if (control and control.research_exhausted()
+                and (review.gaps or review.next_tasks or any(
+                    task.status in {"pending", "blocked"} for task in state["tasks"].values()))):
+            review.missing.append("资料收集预算已到预留边界，停止补查并使用现有证据生成报告")
+            review.next_tasks = []
+        elif (state.get("refine_round", 0) > 0 and review.next_tasks
+              and not (set(identities) - set(state.get("reviewed_evidence_ids", [])))
+              and not (set(review.covered) - set(state.get("reviewed_dimensions", [])))):
+            review.missing.append("本轮补查没有新增证据或覆盖维度，停止自动重复研究；未解决项保留")
+            review.next_tasks = []
         return {
+            "reviewed_evidence_ids": identities, "reviewed_dimensions": review.covered,
             "blocked_by_budget": bool(budget and budget.blocked_by_budget),
             "gap_review": review, "refine_round": state.get("refine_round", 0) + 1,
             "evidence_ids": sorted({identity for note in current_notes for identity in note.evidence_ids}),
@@ -183,9 +203,9 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier
         try:
             draft = writer.run(state["research_contract"], notes(state),
                                previous=previous, verification=state.get("verification_result"))
-        except WorkflowInterrupted:
-            raise
         except Exception as exc:
+            if isinstance(exc, WorkflowInterrupted) and not isinstance(exc, RunBudgetExceeded):
+                raise
             draft_gaps.append(f"Writer 生成或修订失败：{exc}")
             # Preserve the last draft; otherwise verify only actual note findings.
             draft = previous or ReportDraft(title="研究报告", claims=[
@@ -222,6 +242,9 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, verifier
                 "verification_history": [*state.get("verification_history", []), verification]}
 
     def verification_route(state):
+        control = CURRENT_CONTROL.get()
+        if control and control.budget_error:
+            return "render_node"
         if (state["verification_result"].unresolved
                 and state.get("writer_revision", 0) < state["research_contract"].limits.max_writer_revisions):
             return "revision_node"

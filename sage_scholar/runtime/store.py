@@ -27,6 +27,9 @@ class RunStore:
         columns = {r[1] for r in self.conn.execute('PRAGMA table_info(budget)')}
         if 'active_seconds' not in columns:
             self.conn.execute('ALTER TABLE budget ADD COLUMN active_seconds REAL NOT NULL DEFAULT 0')
+        for column in ('cached_input_tokens', 'cache_observed_input_tokens', 'cache_observed_calls'):
+            if column not in columns:
+                self.conn.execute(f'ALTER TABLE budget ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0')
         self.conn.execute('CREATE TABLE IF NOT EXISTS model_reservations (run_id TEXT, lease TEXT PRIMARY KEY, tokens INTEGER)')
         self.conn.commit()
         from sage_scholar.conversations.store import ConversationStore
@@ -68,8 +71,8 @@ class RunStore:
 
     def budget(self, run_id):
         with self.lock:
-            row = self.conn.execute("SELECT used,denied,blocked,prompt_tokens,completion_tokens,active_seconds FROM budget WHERE run_id=?", (run_id,)).fetchone() or (0,0,0,0,0,0)
-        return dict(zip(("tool_calls", "denied_calls", "blocked_by_budget", "prompt_tokens", "completion_tokens", "active_seconds"), row))
+            row = self.conn.execute("SELECT used,denied,blocked,prompt_tokens,completion_tokens,active_seconds,cached_input_tokens,cache_observed_input_tokens,cache_observed_calls FROM budget WHERE run_id=?", (run_id,)).fetchone() or (0,0,0,0,0,0,0,0,0)
+        return dict(zip(("tool_calls", "denied_calls", "blocked_by_budget", "prompt_tokens", "completion_tokens", "active_seconds", "cached_input_tokens", "cache_observed_input_tokens", "cache_observed_calls"), row))
 
     def reserve(self, run_id, limit):
         with self.transaction() as db:
@@ -88,10 +91,20 @@ class RunStore:
             db.execute("INSERT OR IGNORE INTO budget(run_id) VALUES (?)", (run_id,))
             db.execute("UPDATE budget SET blocked=1 WHERE run_id=?", (run_id,))
 
-    def record_usage(self, run_id, prompt, completion):
+    def record_usage(self, run_id, prompt, completion, cached_tokens=None):
         with self.transaction() as db:
             db.execute("INSERT OR IGNORE INTO budget(run_id) VALUES (?)", (run_id,))
             db.execute("UPDATE budget SET prompt_tokens=prompt_tokens+?,completion_tokens=completion_tokens+? WHERE run_id=?", (prompt,completion,run_id))
+
+            if cached_tokens is not None:
+                db.execute("UPDATE budget SET cached_input_tokens=cached_input_tokens+?,cache_observed_input_tokens=cache_observed_input_tokens+?,cache_observed_calls=cache_observed_calls+1 WHERE run_id=?",
+                           (min(prompt, max(0, cached_tokens)), prompt, run_id))
+
+    def model_load(self, run_id):
+        with self.lock:
+            used = self.budget(run_id)
+            reserved = self.conn.execute('SELECT COALESCE(SUM(tokens),0) FROM model_reservations WHERE run_id=?', (run_id,)).fetchone()[0]
+            return used['prompt_tokens'] + used['completion_tokens'] + reserved
 
     def result(self, run_id, key):
         with self.lock:

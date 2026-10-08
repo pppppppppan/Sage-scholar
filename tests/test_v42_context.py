@@ -294,8 +294,13 @@ def test_restart_reuses_actual_persisted_consumed_budget(tmp_path):
     manager.run_store = ledger
     result = manager.prepare([{"role": "user", "content": "继续"}],
         request=request(run_id="run42"), output_reserve=1000)
-    assert '"prompt_tokens": 800' in result.messages[0]["content"]
-    assert '"completion_tokens": 120' in result.messages[0]["content"]
+    assert ledger.budget("run42")["prompt_tokens"] == 800
+    assert ledger.budget("run42")["completion_tokens"] == 120
+    ledger.record_usage("run42", 500, 80)
+    again = manager.prepare([{"role": "user", "content": "继续"}],
+        request=request(run_id="run42"), output_reserve=1000)
+    assert result.messages == again.messages
+    assert "consumed_budget" not in json.dumps(result.messages)
     assert ledger.result("run42", "note:T1")["findings"] == ["completed"]
     ledger.close()
 

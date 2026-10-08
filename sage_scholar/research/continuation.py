@@ -17,6 +17,6 @@ def continue_graph(graph, config, snapshot, request, limits):
     contract = old.model_copy(update={"execution": request, "limits": limits})
     graph.update_state(config, {"research_contract": contract, "tasks": tasks,
         "gap_review": review, "refine_round": 0, "writer_revision": 0, "draft_gaps": [],
-        "task_gaps": [], "planning_exhausted": False, "blocked_by_budget": False,
+        "task_gaps": [], "reviewed_evidence_ids": [], "reviewed_dimensions": [], "planning_exhausted": False, "blocked_by_budget": False,
         "continuation_generation": generation}, as_node="continuation_node")
     return graph.get_state(config)

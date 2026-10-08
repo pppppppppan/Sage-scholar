@@ -3,6 +3,8 @@ import json
 
 from sage_scholar.domain.research import FollowUp, GapReview
 from .structured import structured_response
+from sage_scholar.runtime.journal import WorkflowInterrupted
+from sage_scholar.runtime.control import RunBudgetExceeded
 
 
 class GapReviewer:
@@ -16,7 +18,8 @@ class GapReviewer:
                     "检查研究契约的维度和交付项是否被 findings 覆盖，检查 unknowns/conflicts。"
                     "不要按文风、篇幅或引用数量判断完成。主要结论必须关联证据 ID。"
                     "输出 covered/missing/conflicts/unknowns/next_tasks；next_tasks 指向具体补证任务，"
-                    "可以用已有 task_id 重试，不得改变资料约束。只评价本次输入，不进行搜索。"
+                    "可以用已有 task_id 定向补查，不得重做整个子题或改变资料约束。只评价本次输入，不进行搜索。"
+                    "只安排与用户目标直接相关且可通过新来源解决的关键缺口；常规研究局限、已知无公开信息、网络错误不应无限补查。"
                 )},
                 {"role": "user", "content": json.dumps({
                     "contract": prompt_contract(contract),
@@ -25,6 +28,8 @@ class GapReviewer:
                 }, ensure_ascii=False)},
             ], tag="research:gap_review")
         except Exception as exc:
+            if isinstance(exc, WorkflowInterrupted) and not isinstance(exc, RunBudgetExceeded):
+                raise
             result = GapReview(missing=[f"缺口审查失败：{exc}"])
         # Enforce coverage/identity independently of an optimistic model review.
         backed_dimensions = set()
@@ -59,7 +64,7 @@ class GapReviewer:
                              if not finding.evidence_ids)
             if task_gaps:
                 result.next_tasks.append(FollowUp(
-                    task_id=task.task_id, objective=task.objective + "；核实：" + "; ".join(task_gaps),
+                    task_id=task.task_id, objective="仅针对当前子题定向核实：" + "; ".join(task_gaps[:4]),
                     dimensions=task.dimensions,
                 ))
         result.covered = [dim for dim in result.covered if dim in backed_dimensions]
@@ -74,4 +79,18 @@ class GapReviewer:
             result.next_tasks = [FollowUp(objective="针对以下缺口补充原文证据：" + "; ".join(result.gaps))]
         if not result.gaps:
             result.next_tasks = []
+        # Unresolved facts remain in the report; they are not permission to repeat
+        # the same whole task every round. One automatic re-investigation per task.
+        previous = {task.task_id: task for task in tasks}
+        selected, seen = [], set()
+        for followup in result.next_tasks:
+            task = previous.get(followup.task_id)
+            if task and task.revision >= 1:
+                continue
+            key = followup.task_id or followup.objective.strip().casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(followup)
+        result.next_tasks = selected[:4]
         return result

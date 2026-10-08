@@ -2,10 +2,19 @@
   "fetch": {
     "command": "uvx",
     "args": [
-      "mcp-server-fetch"
+      "mcp-server-fetch",
+      "--proxy-url",
+      "http://127.0.0.1:7897"
     ],
     "env": {
-      "all_proxy": ""
+      "all_proxy": "",
+      "http_proxy": "http://127.0.0.1:7897",
+      "https_proxy": "http://127.0.0.1:7897",
+      "HTTP_PROXY": "http://127.0.0.1:7897",
+      "HTTPS_PROXY": "http://127.0.0.1:7897",
+      "ALL_PROXY": "",
+      "no_proxy": "localhost,127.0.0.1,::1",
+      "NO_PROXY": "localhost,127.0.0.1,::1"
     }
   },
   "paper-search": {
@@ -39,7 +48,15 @@
     ],
     "env": {
       "TAVILY_API_KEY": "${TAVILY_API_KEY}",
-      "NODE_OPTIONS": "--use-env-proxy"
+      "NODE_OPTIONS": "--use-env-proxy",
+      "http_proxy": "http://127.0.0.1:7897",
+      "https_proxy": "http://127.0.0.1:7897",
+      "HTTP_PROXY": "http://127.0.0.1:7897",
+      "HTTPS_PROXY": "http://127.0.0.1:7897",
+      "all_proxy": "",
+      "ALL_PROXY": "",
+      "no_proxy": "localhost,127.0.0.1,::1",
+      "NO_PROXY": "localhost,127.0.0.1,::1"
     }
   },
   "github": {

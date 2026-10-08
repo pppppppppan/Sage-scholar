@@ -40,6 +40,9 @@ export default function RunCard({ run: saved, refresh, archived = false }: { run
       <span>{runLabels[saved.status]}</span><span>{saved.workflow}</span>
       {!!saved.consumed_budget.tool_calls && <span>工具 {saved.consumed_budget.tool_calls} 次</span>}
       {!!saved.consumed_budget.prompt_tokens && <span>累计 token {(saved.consumed_budget.prompt_tokens || 0) + (saved.consumed_budget.completion_tokens || 0)}</span>}
+      {saved.consumed_budget.cache_observed_input_tokens > 0 && <span title="仅统计提供商返回缓存字段的请求，命中的输入仍计入 Run token 上限">
+        输入缓存 {(100 * saved.consumed_budget.cached_input_tokens / saved.consumed_budget.cache_observed_input_tokens).toFixed(1)}%
+      </span>}
       {active && <button disabled={busy || saved.status === "cancel_requested"} className="ml-auto rounded-lg border border-border px-3 py-1 text-foreground" onClick={() => void action(() => runAction(saved.run_id, "cancel"))}>■ {saved.status === "cancel_requested" ? "正在停止…" : "停止生成"}</button>}
     </div>
     {active && <p className="text-sm text-muted-foreground">{saved.progress?.message || notice || "正在处理…"}</p>}

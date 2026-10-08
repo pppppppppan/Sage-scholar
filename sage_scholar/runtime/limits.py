@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class ExecutionLimits(BaseModel):
     max_total_tokens: int = Field(default=2_000_000, ge=4096, le=10_000_000)
+    report_reserve_tokens: int = Field(default=500_000, ge=0, le=5_000_000)
     max_seconds: int = Field(default=3600, ge=1, le=21600)
     max_tool_calls: int = Field(default=240, ge=0, le=1000)
     max_steps: int = Field(default=12, ge=1, le=30)

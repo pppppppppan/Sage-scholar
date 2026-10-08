@@ -6,6 +6,7 @@ from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall, Function,
 )
 from dotenv import load_dotenv
+from .cache_usage import cached_input, anthropic_input
 
 
 load_dotenv()
@@ -145,7 +146,7 @@ class LLMClient:
         messages = prepared.messages
         logger.info("[Context:%s] %s", tag, prepared.accounting)
         control = CURRENT_CONTROL.get()
-        lease = control.reserve_model(prepared.accounting["total_tokens"]) if control else None
+        lease = control.reserve_model(prepared.accounting["total_tokens"], purpose=tag) if control else None
         try:
             check_control()
             if self._is_claude:
@@ -162,7 +163,7 @@ class LLMClient:
                     response = client.chat.completions.create(**kwargs)
                     result = response.choices[0].message
                     self._track_usage(response.usage.prompt_tokens, response.usage.completion_tokens,
-                        time.time() - start, tag, result)
+                        time.time() - start, tag, result, cached_tokens=cached_input(response.usage))
             check_control()
             return result
         finally:
@@ -243,10 +244,11 @@ class LLMClient:
             content=content,
             tool_calls=tool_calls if tool_calls else None,
         )
+        prompt_tokens, cache_read = anthropic_input(response.usage)
         self._track_usage(
-            response.usage.input_tokens,
+            prompt_tokens,
             response.usage.output_tokens,
-            elapsed, tag, msg,
+            elapsed, tag, msg, cached_tokens=cache_read,
         )
         return msg
 
@@ -306,7 +308,7 @@ class LLMClient:
 
     # ---- shared ----
 
-    def _track_usage(self, prompt_tokens, completion_tokens, elapsed, tag, msg):
+    def _track_usage(self, prompt_tokens, completion_tokens, elapsed, tag, msg, cached_tokens=None):
         self.total_prompt_tokens += prompt_tokens
         self.total_completion_tokens += completion_tokens
         self.total_calls += 1
@@ -314,13 +316,18 @@ class LLMClient:
         request = CURRENT_REQUEST.get()
         ledger = getattr(self.context_manager, "run_store", None)
         if ledger and request and request.run_id:
-            ledger.record_usage(request.run_id, prompt_tokens, completion_tokens)
+            if cached_tokens is None:
+                ledger.record_usage(request.run_id, prompt_tokens, completion_tokens)
+            else:
+                ledger.record_usage(request.run_id, prompt_tokens, completion_tokens, cached_tokens=cached_tokens)
         total = prompt_tokens + completion_tokens
         label = f"[LLM:{tag}]" if tag else "[LLM]"
         logger.info(
             "%s 响应: %.1fs, tokens=%d(in:%d+out:%d)",
             label, elapsed, total, prompt_tokens, completion_tokens,
         )
+        logger.info("%s input_cache=%s", label, "unreported" if cached_tokens is None else
+                    f"{cached_tokens}/{prompt_tokens} ({cached_tokens / max(1, prompt_tokens):.1%})")
         logger.debug("%s 输出: %.500s", label, msg.content)
 
 
