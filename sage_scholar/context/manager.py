@@ -10,6 +10,7 @@ from .token_counter import TokenCounter
 from .artifacts import ArtifactStore
 from .conversation import ConversationStore
 from .protection import protected_facts
+from .memory_view import MemoryContextView
 
 CURRENT_REQUEST = ContextVar("sage_execution_request", default=None)
 PROTECTED_PREFIX = (
@@ -205,7 +206,7 @@ class ContextManager:
                 # Small relevant background allocation, independent of the protected context budget.
                 selected, remaining = [], min(1600, self.max_tokens // 8)
                 for record in records:
-                    value = record.model_dump(mode="json", include={"memory_id", "content", "memory_type", "scope", "source", "version"})
+                    value = MemoryContextView.from_record(record).model_dump(mode="json")
                     cost = self.counter.count(_json(value))
                     if cost <= remaining:
                         selected.append(value)
