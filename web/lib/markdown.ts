@@ -49,3 +49,10 @@ export function sanitizeMathDollars(text: string): string {
   }
   return result + normalizeText(text.slice(offset));
 }
+
+/** Link citations only in prose, preserving array indices in formulas and code. */
+export function linkReportCitations(text: string): string {
+  return text.split(/(```[\s\S]*?```|`[^`]*`|\$\$[\s\S]*?\$\$|(?<!\\)\$[^\n$]+?\$)/g)
+    .map((part, index) => index % 2 ? part : part.replace(/(?<!!)\[(\d+)\](?!\()/g, '[$1](#source-$1)'))
+    .join("");
+}

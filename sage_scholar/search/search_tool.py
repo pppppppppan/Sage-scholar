@@ -3,6 +3,7 @@ from typing import Any
 from sage_scholar.mcp.tool_adapter import MCPTool
 from sage_scholar.tools import BaseTool, ToolParameter
 from .adapter import BraveAdapter, TavilyAdapter
+from sage_scholar.runtime.journal import WorkflowInterrupted
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,8 @@ class SearchTool(BaseTool):
                     logger.info("[SearchTool] %s 返回 %d 条结果", name, len(result_list))
                     return self._format_results(result_list)
                 logger.info("[SearchTool] %s 返回空结果", name)
+            except WorkflowInterrupted:
+                raise
             except Exception as e:
                 errors += 1
                 logger.warning("[SearchTool] %s 异常: %s", name, e)

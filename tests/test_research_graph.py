@@ -6,13 +6,13 @@ from sage_scholar.domain.research import FollowUp, GapReview, ResearchTask
 from sage_scholar.graph.graph_builder import build_graph
 from sage_scholar.research.tasks import follow_up_tasks, validate_tasks
 from research_fakes import (
-    contract, FakeSupervisor, FakeResearcher, FakeWriter, CompleteReview, SupportedVerifier,
+    contract, FakeSupervisor, FakeResearcher, FakeWriter, CompleteReview, FakeSynthesis, SupportedReview,
 )
 
 
 def test_research_returns_report_without_rag_write_dependency():
     graph = build_graph(FakeSupervisor(), lambda _: FakeResearcher(), FakeWriter(),
-                        gap_reviewer=CompleteReview(), verifier=SupportedVerifier())
+                        gap_reviewer=CompleteReview(), synthesizer=FakeSynthesis(), report_reviewer=SupportedReview())
     result = graph.invoke({"research_contract": contract()})
     assert result["final_report"].startswith("# 最终报告")
     assert result["report_result"].citations == {1: "ev_a"}
@@ -26,10 +26,10 @@ def test_missing_review_entries_are_reported_as_gaps():
         def review(self, *args):
             return GapReview(missing=["未完成审查"], next_tasks=[FollowUp(objective="补证")])
     graph = build_graph(FakeSupervisor(), lambda _: FakeResearcher(), FakeWriter(),
-                        gap_reviewer=MissingReview(), verifier=SupportedVerifier())
+                        gap_reviewer=MissingReview(), synthesizer=FakeSynthesis(), report_reviewer=SupportedReview())
     result = graph.invoke({"research_contract": contract()})
     assert "未完成审查" in result["report_result"].remaining_gaps
-    assert "已达到研究补查轮数上限" in result["final_report"]
+    assert "阶段性报告" in result["final_report"]
 
 
 def test_independent_tasks_are_parallel_and_dependencies_wait():
@@ -49,7 +49,7 @@ def test_independent_tasks_are_parallel_and_dependencies_wait():
                 assert {note.task_id for note in dependency_notes} == {"A", "B"}
             return super().run(task, contract, dependency_notes)
     graph = build_graph(Supervisor(), lambda _: Researcher(), FakeWriter(),
-                        gap_reviewer=CompleteReview(), verifier=SupportedVerifier())
+                        gap_reviewer=CompleteReview(), synthesizer=FakeSynthesis(), report_reviewer=SupportedReview())
     result = graph.invoke({"research_contract": contract()})
     assert {task.status for task in result["tasks"].values()} == {"completed"}
 
@@ -84,7 +84,7 @@ def test_task_count_limit_stops_unproductive_replanning():
             return GapReview(missing=["missing new dimension"], next_tasks=[FollowUp(objective="new task")])
     review = MissingReview()
     graph = build_graph(FakeSupervisor(), lambda _: FakeResearcher(), FakeWriter(),
-                        gap_reviewer=review, verifier=SupportedVerifier())
+                        gap_reviewer=review, synthesizer=FakeSynthesis(), report_reviewer=SupportedReview())
     report = graph.invoke({"research_contract": contract(max_tasks=1, max_rounds=10)})["report_result"]
     assert review.calls == 2
-    assert "任务数量预算已耗尽，无法新增补查任务" in report.remaining_gaps
+    assert "仍有研究问题未能补齐" in report.remaining_gaps

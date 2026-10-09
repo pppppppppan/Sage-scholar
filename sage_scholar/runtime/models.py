@@ -47,6 +47,7 @@ class RunSnapshot(BaseModel):
     schema_version: int = 4
     checkpoint: dict = Field(default_factory=dict)
     consumed_budget: dict = Field(default_factory=dict)
+    stage_usage: dict = Field(default_factory=dict)
     event_cursor: int = 0
     restart_required: bool = False
     workflow: Workflow

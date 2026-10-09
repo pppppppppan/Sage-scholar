@@ -85,7 +85,7 @@ def test_router_contract_reaches_actual_research_service_runtime(scope, ids):
         assert request.allow_web is False
         assert request.conversation_id == "conversation-a"
         assert request.budget["max_steps"] == 3
-        assert request.budget["max_tool_calls"] == 240
+        assert request.budget["max_tool_calls"] == 100
         assert seen["external"] is False
         snapshot = manager.get(result.run_id)
         assert snapshot.execution == request

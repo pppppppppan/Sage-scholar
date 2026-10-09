@@ -11,7 +11,7 @@ from sage_scholar.runtime.checkpoints import Checkpoints
 from sage_scholar.runtime.journal import JournaledTool, UnknownToolExecution, DurableResearcher
 from sage_scholar.research.budget import ResearchBudget, BudgetedTool
 from sage_scholar.graph.graph_builder import build_graph
-from research_fakes import contract, FakeSupervisor, FakeResearcher, FakeWriter, CompleteReview, SupportedVerifier
+from research_fakes import contract, FakeSupervisor, FakeResearcher, FakeWriter, CompleteReview, FakeSynthesis, SupportedReview
 from sage_scholar.tools.base_tool import BaseTool
 
 
@@ -21,7 +21,7 @@ def graph(checkpoints, calls):
             calls.append(True)
             return super().run(*args, **kwargs)
     return build_graph(FakeSupervisor(), lambda _: Researcher(), FakeWriter(),
-                       gap_reviewer=CompleteReview(), verifier=SupportedVerifier(), checkpointer=checkpoints.saver)
+                       gap_reviewer=CompleteReview(), synthesizer=FakeSynthesis(), report_reviewer=SupportedReview(), checkpointer=checkpoints.saver)
 
 
 def test_restart_resumes_same_native_checkpoint_notes_budget_and_sse(tmp_path):
@@ -104,44 +104,6 @@ def test_committed_tool_results_and_notes_reused_unknown_calls_not_replayed(tmp_
     with pytest.raises(UnknownToolExecution): tool.run_tool({"url":"b"})
     assert len(calls) == 1
     store.close()
-
-
-def test_audit_resume_skips_already_verified_claim_and_preserves_evidence(tmp_path):
-    from types import SimpleNamespace
-    from sage_scholar.audit.service import CitationAuditService
-    from sage_scholar.audit.sources import AuditSources
-    from sage_scholar.audit.graph import build_audit_graph
-    from sage_scholar.infrastructure.evidence_store import JsonEvidenceStore
-    from sage_scholar.domain import EvidenceRef
-    from sage_scholar.routing import Workflow
-    from research_fakes import ScriptedLLM
-    evidence = JsonEvidenceStore(str(tmp_path))
-    item = EvidenceRef.create(source_id="https://example.org/paper", source_version="v1", parser_version="test",
-        original_text="A outperforms B on Dataset X only.", metadata={"kind": "source_content"})
-    evidence.save(item)
-    retrieval = SimpleNamespace(evidence_store=evidence, documents=None)
-    request = contract().execution.model_copy(update={"workflow": Workflow.CITATION_AUDIT, "run_id": "audit-run",
-        "metadata": {"audit": {"claims": [{"text": text, "citations": [item.evidence_id]} for text in ["A beats B on X", "A always beats B"]]}}})
-    checkpoints = Checkpoints(str(tmp_path))
-    llm = ScriptedLLM({"status": "supported", "reason": "X comparison exists"})
-    service = CitationAuditService(retrieval, lambda: llm, checkpoints=checkpoints)
-    sources = AuditSources(retrieval, request.source_policy)
-    audit = build_audit_graph(service, request, llm, sources, checkpointer=checkpoints.saver)
-    list(audit.stream({}, checkpoints.config(request.run_id), interrupt_after=["verify"], durability="sync"))
-    assert len(llm.calls) == 1
-    checkpoints.close()
-    checkpoints = Checkpoints(str(tmp_path))
-    llm = ScriptedLLM({"status": "partially_supported", "reason": "Only X is compared, not every task"})
-    service = CitationAuditService(retrieval, lambda: llm, checkpoints=checkpoints)
-    events = []
-    async def emit(kind, data): events.append((kind,data))
-    outcome = asyncio.run(service.run(request, emit, lambda: False))
-    assert outcome.status == "partial" and len(outcome.result["audit_items"]) == 2
-    assert outcome.result["audit_items"][0]["support_status"] == "supported"
-    assert len(llm.calls) == 1
-    assert [e[1]["claim"]["claim_id"] for e in events if e[0] == "audit_claim_checked"] == ["A2"]
-    assert outcome.result["audit_items"][0]["evidence_ids"] == [item.evidence_id]
-    checkpoints.close()
 
 
 def test_note_commits_before_graph_checkpoint_and_reuses_on_retry(tmp_path):

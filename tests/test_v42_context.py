@@ -14,7 +14,7 @@ from sage_scholar.context.protection import prompt_contract, user_constraints
 from sage_scholar.context.tools import ContextReadTool
 from sage_scholar.domain import EvidenceRef
 from sage_scholar.domain.execution import ExecutionRequest
-from sage_scholar.domain.research import Claim, ReportDraft, Finding, ResearchNote
+from sage_scholar.domain.research import Synthesis, SynthesisBlock, ReportOutline, SectionPlan, Finding, ResearchNote
 from sage_scholar.infrastructure.evidence_store import JsonEvidenceStore
 from sage_scholar.research.evidence_context import ResearchEvidenceContext
 from sage_scholar.routing import SourceScope
@@ -248,10 +248,13 @@ def test_writer_selects_findings_and_counterevidence_not_incidental_observations
     a, b, incidental = [item.evidence_id for item in items]
     note = ResearchNote(task_id="T1", question="q", evidence_ids=[a, b, incidental],
                         findings=[Finding(text="finding", evidence_ids=[a])], conflicts=[f"反例来自 {b}"])
-    llm = ScriptedLLM(ReportDraft(title="Report", claims=[Claim(claim_id="C1", text="claim", evidence_ids=[a])]))
-    Writer(llm, evidence_context=context).run(contract(), [note])
+    llm = ScriptedLLM("正文 [1][2]")
+    synthesis = Synthesis(blocks=[SynthesisBlock(heading="比较", analysis="发现与反例", evidence_ids=[a,b])])
+    plan = SectionPlan(section_id="s", heading="方法", objective="比较", block_indices=[0])
+    outline = ReportOutline(title="Report", sections=[plan])
+    Writer(llm, evidence_context=context).write_section(contract(), synthesis, outline, plan, {1:a,2:b,3:incidental})
     payload = json.loads(llm.calls[0]["messages"][-1]["content"])
-    assert {e["evidence_id"] for e in payload["evidence"]} == {a, b}
+    assert {e["evidence_id"] for e in payload["sources"]} == {a, b}
 
 
 def test_summary_failure_is_explicit_and_entire_original_remains_reloadable(tmp_path):

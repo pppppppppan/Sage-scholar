@@ -59,16 +59,19 @@ class ResearchTask(BaseModel):
     dimensions: list[str] = Field(default_factory=list)
     status: Literal["pending", "completed", "failed", "blocked"] = "pending"
     revision: int = 0
+    completion_criteria: list[str] = Field(default_factory=list)
 
 
 class Finding(BaseModel):
-    text: str
+    text: str = Field(max_length=3000)
     evidence_ids: list[str] = Field(default_factory=list)
     dimensions: list[str] = Field(default_factory=list)
+    basis: Literal["primary", "secondary", "inference", "unknown"] = "unknown"
+    location: str = ""
 
 
 class NoteDraft(BaseModel):
-    findings: list[Finding] = Field(default_factory=list)
+    findings: list[Finding] = Field(default_factory=list, max_length=24)
     evidence_ids: list[str] = Field(default_factory=list)
     unknowns: list[str] = Field(default_factory=list)
     conflicts: list[str] = Field(default_factory=list)
@@ -76,6 +79,8 @@ class NoteDraft(BaseModel):
 
 
 class ResearchNote(NoteDraft):
+    # A persisted note can merge several bounded model drafts after targeted follow-up.
+    findings: list[Finding] = Field(default_factory=list)
     note_id: str = Field(default_factory=lambda: "note_" + uuid4().hex)
     task_id: str
     question: str
@@ -102,48 +107,47 @@ class GapReview(BaseModel):
         return list(dict.fromkeys([*self.missing, *self.conflicts, *self.unknowns]))
 
 
-class Claim(BaseModel):
-    claim_id: str
-    text: str
-    evidence_ids: list[str] = Field(default_factory=list)
+class SynthesisBlock(BaseModel):
+    heading: str = Field(max_length=160)
+    analysis: str = Field(max_length=6000)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=40)
+    limitations: list[str] = Field(default_factory=list, max_length=12)
 
 
-class ReportSection(BaseModel):
+class Synthesis(BaseModel):
+    blocks: list[SynthesisBlock] = Field(default_factory=list, max_length=8)
+
+
+class SectionPlan(BaseModel):
+    section_id: str
+    heading: str = Field(max_length=160)
+    objective: str = Field(max_length=1000)
+    block_indices: list[int] = Field(default_factory=list)
+
+
+class ReportOutline(BaseModel):
+    title: str = Field(max_length=200)
+    sections: list[SectionPlan] = Field(min_length=1, max_length=8)
+
+
+class WrittenSection(BaseModel):
+    section_id: str
     heading: str
-    claim_ids: list[str] = Field(default_factory=list)
+    markdown: str
+    revision: int = 0
 
 
-class ReportDraft(BaseModel):
-    title: str
-    sections: list[ReportSection] = Field(default_factory=list)
-    claims: list[Claim] = Field(default_factory=list)
-
-
-class SupportAssessment(BaseModel):
-    status: Literal["supported", "partially_supported", "unsupported", "uncertain"]
-    reason: str
-
-
-class ClaimVerification(SupportAssessment):
-    claim_id: str
-    identity_valid: bool
-    evidence_ids: list[str] = Field(default_factory=list)
-
-
-class VerificationResult(BaseModel):
-    claims: list[ClaimVerification] = Field(default_factory=list)
-    issues: list[str] = Field(default_factory=list)
-
-    @property
-    def unresolved(self):
-        return [claim for claim in self.claims if claim.status != "supported" or not claim.identity_valid]
+class ReportReview(BaseModel):
+    acceptable: bool
+    issues: list[str] = Field(default_factory=list, max_length=8)
+    revision_instructions: str = Field(default="", max_length=3000)
+    source_request: str = Field(default="", max_length=1000)
 
 
 class ResearchReport(BaseModel):
     report: str
     citations: dict[int, str] = Field(default_factory=dict)
-    claims: list[Claim] = Field(default_factory=list)
-    verification: VerificationResult
-    verification_history: list[VerificationResult] = Field(default_factory=list)
-    removed_claim_ids: list[str] = Field(default_factory=list)
+    citation_evidence: dict[int, list[str]] = Field(default_factory=dict)
     remaining_gaps: list[str] = Field(default_factory=list)
+    section_reviews: dict[str, ReportReview] = Field(default_factory=dict)
+    partial: bool = False

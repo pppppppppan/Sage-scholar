@@ -330,7 +330,7 @@ class RunManager:
     async def _append_event(self, state, event_type, data):
         if state.control and state.snapshot.status != RunStatus.WAITING_FOR_USER:
             state.control.meter()
-        if event_type in {"initializing_tools", "tool_unavailable", "research_started", "audit_started"}:
+        if event_type in {"initializing_tools", "tool_unavailable", "research_started"}:
             state.snapshot.progress["message"] = data.get("message", "")
         elif event_type == "research_planned":
             tasks = {t["task_id"]: t for t in state.snapshot.progress.get("tasks", [])}
@@ -341,8 +341,8 @@ class RunManager:
             for task in state.snapshot.progress.get("tasks", []):
                 if task["task_id"] == note.get("task_id"):
                     task["status"] = "failed" if note.get("metadata", {}).get("task_error") else "completed"
-        elif event_type in {"report_drafting", "citation_verifying", "report_revising"}:
-            state.snapshot.progress["message"] = {"report_drafting": "正在撰写报告…", "citation_verifying": "正在核验引用…", "report_revising": "正在修订报告…"}[event_type]
+        elif event_type in {"research_synthesizing", "report_drafting", "report_reviewing", "report_revising"}:
+            state.snapshot.progress["message"] = {"research_synthesizing": "正在综合研究发现…", "report_drafting": "正在分章节撰写报告…", "report_reviewing": "正在审查报告内容…", "report_revising": "正在局部修订报告…"}[event_type]
         if event_type == "answer_delta":
             state.snapshot.result = {**(state.snapshot.result or {}), "answer": (state.snapshot.result or {}).get("answer", "") + data.get("text", "")}
         elif event_type in {"answer", "write"}:
@@ -352,6 +352,7 @@ class RunManager:
         state.snapshot.updated_at = utc_now()
         if self.store:
             state.snapshot.consumed_budget = self.store.budget(state.snapshot.run_id)
+            state.snapshot.stage_usage = self.store.stages(state.snapshot.run_id)
         if self.checkpoints and not state.snapshot.restart_required:
             try:
                 state.snapshot.checkpoint = self.checkpoints.reference(state.snapshot.run_id, state.snapshot.workflow)

@@ -1,4 +1,4 @@
-from sage_scholar.domain.research import Finding, GapReview, ResearchNote, ResearchTask
+from sage_scholar.domain.research import Finding, FollowUp, GapReview, ResearchNote, ResearchTask
 from sage_scholar.research.gap_review import GapReviewer
 from research_fakes import ScriptedLLM, contract
 from test_research_evidence import evidence_context
@@ -15,10 +15,10 @@ def setup_note(context):
 def test_missing_dimension_causes_targeted_followup(evidence_context):
     task, note = setup_note(evidence_context)
     request = contract().model_copy(update={"requested_dimensions": ["methods", "ablation"]})
-    review = GapReviewer(ScriptedLLM(GapReview(covered=["methods", "ablation"])), evidence_context)
+    review = GapReviewer(ScriptedLLM(GapReview(covered=["methods", "ablation"], next_tasks=[FollowUp(objective="读取消融实验", dimensions=["ablation"])])), evidence_context)
     result = review.review(request, [task], [note])
     assert result.covered == ["methods"]
-    assert "未覆盖维度：ablation" in result.missing
+    assert "尚需补充或解释：ablation" in result.missing
     assert any("ablation" in item.dimensions for item in result.next_tasks)
 
 
@@ -35,8 +35,8 @@ def test_unknown_conflict_and_missing_evidence_target_original_task(evidence_con
     note.findings[0].evidence_ids = []
     result = GapReviewer(ScriptedLLM(GapReview()), evidence_context).review(contract(), [task], [note])
     assert result.unknowns == note.unknowns and result.conflicts == note.conflicts
-    assert any("缺少证据" in gap for gap in result.missing)
-    assert any(item.task_id == "T1" for item in result.next_tasks)
+    assert any("缺少可追溯" in gap for gap in result.missing)
+    assert result.next_tasks == []  # Diagnostics alone must not force repeated research.
 
 
 def test_missing_task_note_cannot_be_approved(evidence_context):

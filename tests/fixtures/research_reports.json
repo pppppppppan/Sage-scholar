@@ -1,0 +1,67 @@
+{
+  "notice": "Synthetic evidence for deterministic offline contracts; not real literature findings or an LLM quality benchmark.",
+  "cases": [
+    {
+      "name": "opd",
+      "query": "帮我调研一下 On-Policy Distillation (OPD)",
+      "titles": [
+        "学生轨迹与蒸馏目标",
+        "采样策略与计算约束"
+      ],
+      "sources": [
+        "Synthetic fixture. On-policy training samples trajectories from the current student. Teacher feedback supervises student-visited prefixes. A divergence objective measures teacher/student distributions. Fixed offline training uses a predefined corpus. No benchmark scores are provided.",
+        "Synthetic fixture. Online sampling adds rollout cost. Comparing approaches requires the same teacher, student, dataset and rollout budget. Neither source establishes superiority on all tasks."
+      ],
+      "headings": [
+        "概念与训练机制",
+        "技术路线及适用条件",
+        "实验解释与研究局限"
+      ],
+      "analysis": "共同问题是训练与推理所遇前缀的差异；在线采样与固定语料是不同策略。目标函数和采样预算需要分开比较，不能给出全任务排名。",
+      "paragraph": "On-policy 方法使用当前学生采样的轨迹，因此监督覆盖学生实际到达的前缀；固定语料方法使用预先确定的数据。[1] 两者不能只按名称比较性能，还需控制教师、学生和采样预算。[2]",
+      "formula": "$$\nL=\\mathbb{E}_{x\\sim p_\\theta}[D(p_T\\|p_\\theta)]\n$$"
+    },
+    {
+      "name": "two_papers",
+      "query": "深入比较论文 A 与论文 B 的方法和实验条件",
+      "titles": [
+        "论文 A：规则网格算子",
+        "论文 B：边界残差约束"
+      ],
+      "sources": [
+        "Synthetic fixture. Paper A learns a data-driven operator on a regular grid. Error is 0.08 on Dataset X using 100 labeled trajectories. Changed boundary conditions were not evaluated.",
+        "Synthetic fixture. Paper B imposes a differential residual at collocation points with 10 labeled trajectories. Error is 0.04 on Dataset Y. Dataset Y has different geometry and boundary conditions from X."
+      ],
+      "headings": [
+        "共同目标与机制差异",
+        "数据与实验可比性",
+        "适用条件和待验证问题"
+      ],
+      "analysis": "A 借助标签学习算子，B 引入残差约束；数据集和边界条件不同，不能由误差数字推导优劣。",
+      "paragraph": "A 使用标注轨迹学习算子，B 利用微分残差补充少量标签。[1][2] 两篇论文采用不同数据集和边界条件，不能把报告误差直接作为优劣排名。",
+      "formula": "$$\nL=L_{data}+\\lambda L_{residual}\n$$"
+    },
+    {
+      "name": "field_review",
+      "query": "综述 AI4CFD 领域的主要技术路线及局限",
+      "titles": [
+        "数据驱动算子",
+        "物理残差方法",
+        "混合求解器"
+      ],
+      "sources": [
+        "Synthetic fixture. Operator learning amortizes repeated solutions across training parameter distributions. Accuracy depends on representative samples; out-of-distribution geometries are not evaluated.",
+        "Synthetic fixture. Residual models incorporate governing equations and boundary constraints. Optimization depends on residual weighting and collocation sampling; no universal accuracy guarantee exists.",
+        "Synthetic fixture. Hybrid solvers combine numerical discretization with learned corrections. Cost includes both components. Hardware and accuracy targets must be aligned for speed comparisons."
+      ],
+      "headings": [
+        "问题与技术分类",
+        "机制与成本比较",
+        "局限及研究问题"
+      ],
+      "analysis": "三条路线强调数据分布、方程约束和数值结构；成本与泛化瓶颈不同，不能脱离误差目标和硬件比较速度。",
+      "paragraph": "算子学习将多次求解成本摊销到训练阶段，残差方法引入方程约束，混合方法保留数值离散结构。[1][2][3] 这种分类解释了不同适用条件；速度和精度需在共同设置下验证。",
+      "formula": ""
+    }
+  ]
+}

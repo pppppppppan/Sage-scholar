@@ -17,7 +17,7 @@ from sage_scholar.runtime.control import check_control, cooperative_thread, CURR
 from sage_scholar.routing import Workflow, QueryRouter
 from sage_scholar.graph.graph_builder import build_graph
 from sage_scholar.research.continuation import continue_graph
-from research_fakes import contract, FakeSupervisor, FakeResearcher, FakeWriter, CompleteReview, SupportedVerifier
+from research_fakes import contract, FakeSupervisor, FakeResearcher, FakeWriter, CompleteReview, FakeSynthesis, SupportedReview
 
 class Direct:
     def __init__(self): self.calls = []
@@ -160,7 +160,7 @@ class HumanRunner:
         class Researcher(FakeResearcher):
             def run(self, *args): outer.calls.append(args[1].objective); return super().run(*args)
         return build_graph(FakeSupervisor(), lambda _: Researcher(), FakeWriter(), gap_reviewer=CompleteReview(),
-            verifier=SupportedVerifier(), checkpointer=self.checkpoints.saver,
+            synthesizer=FakeSynthesis(), report_reviewer=SupportedReview(), checkpointer=self.checkpoints.saver,
             interaction=lambda _: {'question':'比较精度还是算力？','options':['精度','算力'],'allow_skip':False})
     async def run(self, request, emit, cancelled):
         g = self.graph(); config = self.checkpoints.config(request.run_id)
@@ -219,7 +219,7 @@ def test_partial_native_continuation_reuses_completed_notes(tmp_path):
         def review(self, contract, tasks, notes):
             return GapReview(missing=['compute'], next_tasks=[FollowUp(objective='compute')]) if len(notes)==1 else GapReview()
     cp=Checkpoints(tmp_path)
-    graph=build_graph(FakeSupervisor(),lambda _:Researcher(),FakeWriter(),gap_reviewer=Review(),verifier=SupportedVerifier(),checkpointer=cp.saver)
+    graph=build_graph(FakeSupervisor(),lambda _:Researcher(),FakeWriter(),gap_reviewer=Review(),synthesizer=FakeSynthesis(), report_reviewer=SupportedReview(),checkpointer=cp.saver)
     request=contract().execution.model_copy(update={'run_id':'partial'})
     config=cp.config('partial')
     graph.invoke({'research_contract':contract()},config)

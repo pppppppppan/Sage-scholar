@@ -1,6 +1,6 @@
 # SAGE Scholar
 
-SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。当前已完成 Long-term Memory Final Fix，支持 Direct、文档 QA、异步 Deep Research 与 Citation Audit，并统一上下文预算、自动长期 Memory 和可恢复 Run。统一查询接口先经过 Router，再按任务复杂度选择执行链。FastAPI 只处理协议，业务编排集中在 `QueryService`，长任务生命周期由 `RunManager` 管理，研究 Graph 只维护 workflow 内部状态。
+SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。支持 Direct、文档 QA、异步 Deep Research，独立 Citation Audit 已移除，并统一上下文预算、自动长期 Memory 和可恢复 Run。统一查询接口先经过 Router，再按任务复杂度选择执行链。FastAPI 只处理协议，业务编排集中在 `QueryService`，长任务生命周期由 `RunManager` 管理，研究 Graph 只维护 workflow 内部状态。
 
 ```mermaid
 flowchart LR
@@ -16,6 +16,20 @@ flowchart LR
     RM --> SSE[SSE Events]
     SSE --> UI
 ```
+
+## Deep Research 报告链重构（2026-10-09）
+
+当前流程：研究契约 → 任务规划 → Researcher → 缺口审查/定向补查 → 跨论文综合 → 章节规划 → Markdown 写作 → 章节审查/局部修订 → 报告。
+
+- 删除独立 Citation Audit API、自动路由和前端按钮，以及逐 Claim 的 CitationVerifier、ReportDraft、CitationRenderer。保留真实 Evidence、SourcePolicy、原文位置与确定性引用检查。历史 Audit 标签只用于读取旧记录，不能再新建或恢复。
+- 规划提供研究维度和完成标准；研究笔记区分一手来源、二手综述和推论。缺口审查按有界批次执行，普通局限不再自动触发反复调研。
+- 综合按约 6000 token 的材料组处理并层级归并；Writer 按共享 Outline 分章节写作，每章立即审查，只修有问题的章节。全 Run 最多一次报告阶段定向补读，仍受工具、token 和修订上限限制。
+- 每个综合批次、章节写作、审查和局部修订都有 checkpoint。预算不足保留已完成章节并标记阶段性报告；没有可发布正文则明确失败，禁止拼接笔记或工具原文兜底。仅缺写作的续跑复用已完成章节。
+- 同一来源版本的多个证据片段合并为一个参考文献编号；citation_evidence 保留编号到全部引用片段的映射。公式和代码中的数组下标不会被当成引用改写。
+- Run 持久化阶段输入/输出 token、供应商提供的缓存命中与未命中、耗时及工具失败次数，前端可展开查看。没有缓存字段时显示未知；失败请求若没有 usage，无法统计精确计费。
+- 默认预算为 60 万总 token、15 万收尾预留、100 次工具调用、每子题 6 步、最多 8 个任务、1 轮自动补查、每章 1 次修订。单次上下文仍由原 Context Manager 控制。
+- 新 checkpoint schema 为 research-markdown-v1。旧版本未完成的 Research 需要明确重新开始；历史已完成报告保留。新版继续使用原 Cancel、HITL、SSE 与恢复机制。
+- 已添加 OPD、两论文比较、领域综述的固定合成 Evidence 回归。这些测试验证阶段调用、格式和来源契约，不代表真实模型已达到研究质量要求。本轮未运行付费端到端调研；最后收尾修改按用户要求未重新运行测试。
 
 ## Long-term Memory Final Fix（2026-10-08）
 
@@ -34,7 +48,6 @@ flowchart LR
 - Recall 结合原问题、当前任务 objective、契约维度和调用用途。按 workspace/session、查询、持久化 revision 缓存至多 256 组 ID/version，重复调用不重复 query embedding；记忆变更自然失效。仍最多注入 5 条相关有效记忆。
 - 自动与手动重新抽取共用持久化 Research 输入读取器：优先原 checkpoint 中的 Contract/Notes，缺失时从 SQLite Run/事件重建；包含 final claims、gaps/conflicts/unknowns。研究出处保存 run_id、research_note_id/task_id、claim_id（如有）、quote 和通过原文检查的 evidence_ids。Memory 不是 Evidence。
 - 面板支持查看、修改、删除、版本、完整来源及后台任务状态。已删除 confirmed 字段、approve/reject/candidates API 和候选持久审批流程。旧 memory.json 首次写入升级 schema 3，原文件备份为 memory.pre-finalization.json。
-- Citation Audit 在允许的本地文档中先匹配 DOI/arXiv/document_id，再规范化精确题名；已有作者/年份用于排除冲突，缺失不伪装成已核验。多文档同名返回 ambiguous + uncertain，不选第一条；允许联网且本地未找到时才使用现有 paper-search。source_not_found 不等于 fabricated。
 - 沿用 [GauzMem](https://github.com/fightheyyy/gauzmem) 的可追溯抽取、consolidation、语义召回与时间生命周期思路；不引入新依赖、分布式服务或第二套 Context/Recovery。
 - Job 使用稳定 source key；抽取草稿先持久化，Memory 与操作回执原子写入并 fsync。崩溃后可重试模型调用，但不会因重复提交复活或重复创建已处理记忆；不承诺外部模型调用 exactly-once。失败最多自动尝试 3 次，之后保留 failed，用户可重新整理。
 - `/api/memories/extract` 返回 HTTP 202 和 job；GET `/api/memories/jobs` 或 `/jobs/{id}` 查看状态。手动重新抽取也复用原 source/job，不新增第二套写入流程。
@@ -45,49 +58,17 @@ flowchart LR
 - Context 采用当前指令/SourcePolicy/明确限制 + 最近两轮原始对话 + 较早历史结构化摘要 + Memory + 任务笔记/证据；不再把全部历史 user message 复制进 system。当前指令优先于旧限制与 Memory。
 - 旧历史按 token 分块，用同一个 LLMClient 增量汇总目标、先前结论、未解决问题和指代；摘要不作为科研事实。`data/context_summaries` 原子保存摘要，原对话保存在 `data/context_artifacts`，同一 Run 恢复时按内容指纹复用，不展开旧历史到 prompt。压缩失败明确降级为不完整原话摘录，不能假装完成语义摘要。
 - 模型调用前统一计入消息/工具 schema、SourcePolicy、Memory、ResearchNote/Evidence、框架开销及输出预留；日志包含分项估算。超限按工具外置、去重、整轮旧工具记录归档、历史摘要、旧过程摘录、证据窗口缩小依次处理，仍放不下明确报错，不静默删除限制。
-- 大工具结果保留 artifact/evidence ID、短摘录及定位；`read_context_artifact(identity, offset, limit)` 定向回读。Writer 选取 findings 和明确反例关联的证据；Verifier 继续逐 Claim 读取证据，不在模型边界偷偷缩短原文。原文不全/预算不足不能判为 supported。
+- 大工具结果保留 artifact/evidence ID、短摘录及定位；`read_context_artifact(identity, offset, limit)` 定向回读。Synthesis/Writer 按主题选择证据，Report Review 按章节检查重要结论。原文窗口截断明确标记，不能假定未展示部分支持结论。
 - QA 用共享 conversation context 解析“第二个相比第一个”等追问：先改写检索问题，再把同一历史背景与新检索证据交给回答模型。指代不明确则澄清，不凭历史助手回答生成科研引用。
 - 保留原 Research Graph、Run/Checkpoint 与 Memory/Evidence contract；压缩调用也通过原预算账本记账。无新服务或依赖。近期轮数可在 ContextManager 构造参数 `recent_turns` 调整。
 - 验证：新增 18 项专项回归，全量后端 208 项通过；compileall、前端 lint/build、diff 检查通过。详细修改文件与边界见本地 [V4.2 交付说明](docs/v4.2-context.md)。
 - 边界：token 数是现有 tokenizer 加开销的估算，不是所有 provider 的精确计费；明确限制采用保守指令句提取，复杂隐含要求仍应明确写入当前请求/契约。未给摘要引入事实正确性评分。
 
-## V4.1：Citation Audit correctness patch（2026-09-29）
+## 持久运行与来源边界
 
-- 普通参考文献解析常见作者/题名/年份、APA 和引号题名格式；DOI/arXiv/URL 优先定位，否则在允许联网时复用 paper-search 学术检索。检索只确认身份，摘要不会作为最终 Evidence。
-- 题名规范化后匹配，要求已提供的作者、年份也一致。仅一个可确认身份时读取原文；不同 ID 的多个候选或元数据冲突不会随便选第一条。检索未找到/工具不可用返回 source_not_found，不能据此判断伪造。
-- 无引用主张返回 `citation_status=missing`、`source_identity_status=not_applicable`、`support_status=uncertain`，报告显示 missing_citation；所选文档仅是资料范围，不会自动绑定为原 citation。
-- 元数据确认身份但全文不可用时，身份可为 source_found，支持程度仍是 uncertain；继续使用原 Evidence/Claim/Verifier，不把 metadata 或模型总结当正文证据。
-- Audit checkpoint 版本标识更新，避免恢复 V4 中已经自动绑定所选文档的旧中间结果；未完成的旧 Audit 需明确重新开始。Research checkpoint 与恢复架构不变，已完成历史报告不回写。
-- 解析采用保守规则：特殊格式、题名缩写、作者/年份缺失或预印本与发表版年份不同，可能需要用户补 DOI/arXiv；不以模糊相似度替代文献身份确认。
-
-- 验证：新增 26 项身份/引用回归，全量后端 190 项通过；compileall、前端 lint/build 通过。外部 MCP/LLM 使用测试替身，真实联网可用性与模型判断仍需实际案例检查。
-
-## V4：Citation Audit、Context/Memory、持久化恢复（2026-09-28）
-
-- Citation Audit 复用 V3 Claim / Evidence / CitationVerifier，区分来源未找到和主张不支持；支持报告正文、Claim + Citation、已有报告 Run。前端报告旁新增“核验这份报告的引用”。
-- 每次 LLM 调用统一计算 system、prompt、history、工具 schema、笔记/证据、Memory 和输出预留；大工具结果外置，可按 ID 回读，保留 SourcePolicy、用户限制、冲突/未知及工具配对。
-- Memory 支持增删改查，V4.4 已升级为有依据的自动抽取入库；当前指令优先，Memory 不进入 Evidence/RAG。
-- `data/runtime.sqlite3` 持久化 Run、事件、预算、工具结果及 ResearchNote；`data/checkpoints.sqlite3` 使用 LangGraph 官方 SQLite saver 保存图状态。SSE 先落库再发送。
-- 重启时有兼容 checkpoint 且无未知工具调用的任务继续原 Run；否则标记 interrupted/restart_required。刷新和 SSE 重连只查询/重放，不创建新任务。
-- 新依赖：`langgraph-checkpoint-sqlite>=3.1,<4`。更新后先 `python -m pip install -r requirements.txt`，再重启后端；沿用原启动命令。
-- 检查：后端 164 项、前端 10 项测试通过；compileall、lint、production build 通过。外部 LLM 语义质量仍需实际论文案例验证。
-- 未引入 Paper2Code、分布式队列或新的研究主链。完整接口示例、恢复边界、参考设计与技术债见本地 [V4 交付说明](docs/v4-delivery.md)。
-
-## V3.1 correctness patch（2026-09-27）
-
-- 区分预算“刚好用满”与“实际阻断工作”：只有后者产生预算缺口，完成任务不会因 used == limit 被误判 PARTIAL。
-- 最终标题/小节仅保留中性导航标签；事实断言、引用 marker、与历轮被否决 Claim 重合的文字自动降级，正文引用逻辑不变。
-- 128 项后端测试、compileall、前端 lint/build 通过。不新增工作流或依赖。改动与测试说明见 [V3.1 修补记录](docs/v3.1-correctness-patch.md)。
-
-## V3：Deep Research Evidence 化（2026-09-26）
-
-- 研究员保留 ReAct 工具循环，输出结构化 ResearchNote、真实 evidence_ids、unknowns 和 conflicts。
-- 原 LangGraph 增加任务依赖/定向补查、Gap Review、Claim/Evidence 核验和有限 Writer 修订。
-- 搜索摘要、状态和错误仅作为 Observation；明确读取的原文进入 EvidenceStore，报告仍不自动入库。
-- 只将通过来源身份及语义支持核验的 Claim 纳入正文；最终引用由确定性 renderer 编号，Run result 返回 citations → Evidence API 映射。
-- 缺口、预算耗尽或未支持主张产生 PARTIAL；SSE/前端增加撰写、核验、修订阶段。Direct/QA/文档版本与原 HTTP 路径保持兼容。
-- 验证：101 项后端测试通过；compileall、前端 lint/build、diff 检查通过。外部 LLM/MCP 使用测试替身，真实语义质量未评测。
-- 详细实现、预算参数、测试范围和技术债见 [V3 交付说明](docs/v3-research-evidence.md)。文档按既有 .gitignore 仅保留本地。
+- Evidence 保存真实原文、来源身份、版本和位置；搜索摘要、Memory、模型笔记和工具错误不是 Evidence。
+- SQLite 保存 Run、SSE 事件、预算、工具结果及 ResearchNote；LangGraph SQLite saver 保存图状态，事件先落库再发送。
+- 有兼容 checkpoint 且无未知外部执行状态时恢复原 Run，否则明确要求重新开始。页面刷新只读取和重放，不重复执行研究。
 
 ## V2.1 修补（2026-09-26）
 
@@ -110,7 +91,7 @@ flowchart LR
 - `Direct`：日期、星期等本地确定性问题不调用模型；其他简单问题通过统一 Model Gateway 回答。
 - 连续对话：回答后保留输入框和本轮消息，本轮历史交给统一 Context Manager，保留近期对话并汇总较早历史，单独保护明确限制；点击“新对话”可清空本轮上下文。
 - `QA`：从上传的论文/文档进行 BM25 + 向量检索、RRF、rerank，并以结构化 `EvidenceRef` 返回证据。
-- `Deep Research`：复用 SAGE Research 的 LangGraph 与并行 ReAct，现为 contract → task DAG → ResearchNote → gap review/targeted retry → Claim → citation verification/revision → renderer，由后台 `Run` 执行并通过 SSE 推送进度。
+- `Deep Research`：复用 SAGE Research 的 LangGraph 与并行 ReAct，现为 contract → task DAG → ResearchNote → gap review → synthesis → outline → Markdown sections → report review，由后台 `Run` 执行并通过 SSE 推送进度。
 - 研究报告只作为 Run 产物返回，不会自动写回 RAG；仅在用户主动点击保存时进入文档库。
 - 文档库：上传、导入、列表、删除、保存研究报告。
 - 长任务：创建、查询、取消、持久化 SSE 回放、兼容 checkpoint 恢复、显式重新开始；状态保存在本地 SQLite。
@@ -132,7 +113,6 @@ sage-scholar/
 │   ├── research/         # Deep Research runtime
 │   ├── graph/            # LangGraph workflow
 │   ├── rag/              # hybrid retrieval
-│   ├── audit/            # Claim/source 解析与复用 CitationVerifier 的 AuditGraph
 │   ├── memory/           # 自动长期记忆、召回与用户管理
 │   ├── context/          # 完整请求预算、保护信息、artifact 外置与回读
 │   ├── tools/            # 统一工具基础接口与 registry
@@ -214,9 +194,9 @@ npm --prefix web run build
 ## 已知边界
 
 - Run/事件/预算已持久化；兼容 checkpoint 可恢复原任务。缺失、不兼容或有未知工具调用时明确 interrupted/restart_required，需用户重新开始。
-- Deep Research 已接入 Note/Claim/Evidence、Context Manager 和持久化 checkpoint。引用支持核验依赖模型判断，仍需真实样本检验；尚无完整审计 lineage。
+- Deep Research 已接入 ResearchNote/Synthesis/Evidence、Context Manager 和持久化 checkpoint。引用支持核验依赖模型判断，仍需真实样本检验；尚无完整审计 lineage。
 - PDF 证据目前可以带来源、版本和可选 section/page 字段，但旧解析链不能稳定提供逐页定位。
-- Citation Audit 已支持来源身份定位与主张支持核验。Search、Paper2Code、完整 Eval、Trace/监控和代码沙箱仍待实现。
+- Search、Paper2Code、完整 EvalRunner 和代码沙箱不属于本轮范围。
 - 本阶段没有引入 Redis、Celery、Kafka、独立 Worker、认证或多用户并发体系。
 
 工程审计见 [`docs/repository-audit.md`](docs/repository-audit.md)，逐文件迁移来源见 [`docs/migration-map.md`](docs/migration-map.md)。
@@ -241,11 +221,11 @@ npm --prefix web run build
 
 ### Conversation 与任务交互
 
-- 左侧历史以 Conversation 为单位，普通问答与 Research/Audit Run 共用持久化消息。支持搜索、重命名、归档和确认删除；URL `?conversation=...` 支持刷新和前进/后退。
+- 左侧历史以 Conversation 为单位，普通问答与 Research Run 共用持久化消息。支持搜索、重命名、归档和确认删除；URL `?conversation=...` 支持刷新和前进/后退。
 - `/api/conversations` 管理对话；`POST /api/queries` 携带 `conversation_id` 和客户端 `request_id`。服务端读取真实历史，同一请求重试不会重复执行。一个对话同时执行一个任务，不同对话共用进程内执行槽位。
 - `POST /api/runs/{id}/cancel` 真正停止调度。MCP 取消指定调用；同步模型请求合作式取消，可能需要等当前网络调用超时，但不会继续派发后续调用。SSE 断开不取消 Run。
 - LangGraph 原生 interrupt 保存问题；Run 进入 `waiting_for_user`。`POST /api/runs/{id}/respond` 校验 conversation/run/interrupt ID，再使用 `Command(resume)` 继续。问题及回答持久化，重复或过期回答拒绝。
-- Deep Research 默认每个研究员 12 步，Run 最多 240 次工具调用、200 万模型 token、3600 秒活动执行时间；与单次 Context 窗口独立。可通过 `SAGE_DEEP_RESEARCH_MAX_TOOL_CALLS`、`SAGE_DEEP_RESEARCH_MAX_TOTAL_TOKENS`、`SAGE_DEEP_RESEARCH_MAX_SECONDS` 等配置，有硬上限。
+- Deep Research 默认每个研究员 6 步，Run 最多 100 次工具调用、60 万模型 token、3600 秒活动执行时间；与单次 Context 窗口独立。可通过 `SAGE_DEEP_RESEARCH_MAX_TOOL_CALLS`、`SAGE_DEEP_RESEARCH_MAX_TOTAL_TOKENS`、`SAGE_DEEP_RESEARCH_MAX_SECONDS` 等配置，有硬上限。
 - partial 的“继续研究”沿用 run ID、证据、已完成笔记和累计消耗，并在硬上限内追加执行预算。没有兼容 checkpoint 或存在未确认外部调用时，要求明确重新开始，不承诺 exactly-once。
 - 删除先留下对话 tombstone，再取消并等待关联 Run 收尾，删除消息、Run journal、事件和 checkpoint，取消未完成的记忆抽取。文献、Evidence 与已经保存的长期记忆属于科研工作区，保留并可单独管理。
 
@@ -273,6 +253,6 @@ python -m sage_scholar.mcp.check --server tavily
 
 - 提示词前缀保留稳定的指令、资料权限和预算配置；实时消耗不再注入 prompt，动态缺口和召回 Memory 放在后部。原有压缩、工具配对、来源回读与 Memory/Evidence 边界保持不变。
 - 同一研究员重复的成功工具调用复用结果；连续失败或重复无进展时结束该子任务。每个子题最多一次自动补查，每轮最多四个补查任务；没有新增证据/覆盖维度时停止重复研究，未解决项仍进入报告。
-- 默认从 200 万 Run token 中预留 50 万用于笔记、报告和核验，可设置 `SAGE_DEEP_RESEARCH_REPORT_RESERVE_TOKENS=500000`（最多占总预算一半）。这是收集阶段的停止边界，不能保证所有规模的报告都能完成；硬上限仍生效。
+- 默认从 60 万 Run token 中预留 15 万用于笔记、综合、报告和审查，可设置 `SAGE_DEEP_RESEARCH_REPORT_RESERVE_TOKENS=150000`（最多占总预算一半）。这是收集阶段的停止边界，不能保证所有规模的报告都能完成；硬上限仍生效。
 - Run 卡片显示服务商实际返回的输入缓存命中率；未上报的调用不计入分母。日志中的 `input_cache=unreported` 表示未知，不能当作零命中。缓存输入仍计入累计 token，缓存主要降低输入费用/延迟，实际命中率取决于服务商与请求前缀。
 - 重启后新建一次调研，观察累计 token、输入缓存和剩余缺口。旧 Run 的历史消耗不会清零；旧调用没有缓存指标，无法补算。

@@ -47,7 +47,7 @@ def test_tool_error_and_metadata_are_observations(tmp_path, result):
     store, captured, observations = JsonEvidenceStore(str(tmp_path)), [], []
     output = EvidenceTool(SourceReader(result), store, captured.append, observations.append).run_tool(
         {"url": "https://example.org"})
-    assert "Observation" in output
+    assert "Observation" in output or output.startswith("Error:")
     assert captured == [] and observations[0]["evidence_ids"] == []
 
 

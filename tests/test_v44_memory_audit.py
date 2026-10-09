@@ -8,7 +8,6 @@ from research_fakes import contract
 from test_v43_memory import memory, value, extraction, Embedding
 from test_query_service import make_service
 from sage_scholar.application.query_service import QueryCommand
-from sage_scholar.audit.sources import AuditSources
 from sage_scholar.domain import EvidenceRef
 from sage_scholar.domain.documents import DocumentRecord, DocumentVersion
 from sage_scholar.domain.execution import RunOutcome
@@ -132,57 +131,6 @@ def test_research_automatic_memory_has_real_evidence_ids(tmp_path, status):
         await manager.shutdown()
         db.close()
     asyncio.run(scenario())
-
-
-def local_sources(tmp_path, metadata=None, duplicate=False):
-    store = JsonEvidenceStore(str(tmp_path))
-    path = tmp_path / "paper.md"
-    path.write_text("A beats B on Dataset X only.")
-    docs, sections = [], []
-    for i in range(2 if duplicate else 1):
-        doc = DocumentRecord(document_id=f"doc_{i}", title="Attention Is All You Need", source_identifier=str(path),
-            converted_path=str(path), document_version="v1", active_version="v1", parser_version="test",
-            metadata=metadata or {}, versions=[DocumentVersion(document_version="v1", version_number=1,
-                parser_version="test", converted_path=str(path))])
-        docs.append(doc)
-        item = EvidenceRef.create(source_id=str(path), document_id=doc.document_id, original_text=path.read_text(),
-            source_version="v1", parser_version="test", metadata={"converted_path": str(path)})
-        store.save(item)
-        sections.append(item)
-    retrieval = SimpleNamespace(evidence_store=store, documents=SimpleNamespace(get=lambda id: next(d for d in docs if d.document_id == id)),
-        permitted_documents=lambda policy: [d for d in docs if policy.permits_document(d.document_id)],
-        read_documents_sync=lambda policy: [e for e in sections if policy.permits_document(e.document_id)])
-    request = contract().execution.model_copy(update={"allow_web": False, "source_scope": SourceScope.WORKSPACE})
-    class NoNetwork:
-        def search(self, reference):
-            pytest.fail("local identity must not start paper-search")
-        def __call__(self, source):
-            pytest.fail("local identity must not fetch")
-    return AuditSources(retrieval, request.source_policy, NoNetwork()), request, retrieval
-
-
-@pytest.mark.parametrize("metadata", [{}, {"authors": ["Ashish Vaswani"], "year": 2017}])
-def test_local_bibliography_normalized_title_and_optional_metadata(tmp_path, metadata):
-    sources, _, _ = local_sources(tmp_path, metadata)
-    result = sources.resolve("1", "Vaswani et al. Attention Is All You Need. NeurIPS 2017.")
-    assert result.status == "source_found" and result.evidence_ids
-    assert sources.context.get(result.evidence_ids[0]).original_text.startswith("A beats B")
-
-
-def test_ambiguous_local_title_is_not_arbitrarily_selected(tmp_path):
-    sources, _, _ = local_sources(tmp_path, duplicate=True)
-    result = sources.resolve("1", "Vaswani et al. Attention Is All You Need. NeurIPS 2017.")
-    assert result.status == "source_not_found" and result.metadata["resolution"] == "ambiguous"
-    assert result.evidence_ids == [] and "伪造" in result.reason
-
-
-def test_local_identifier_priority_and_scope(tmp_path):
-    sources, request, retrieval = local_sources(tmp_path, {"doi": "10.1000/test", "arxiv_id": "1706.03762"})
-    for ref in ["DOI:10.1000/test", "arxiv:1706.03762", "doc_0"]:
-        assert sources.resolve("1", ref).status == "source_found"
-    assert sources.resolve("1", "Attention Is All You Need DOI:10.1000/other").status == "source_not_found"
-    restricted = request.model_copy(update={"source_scope": SourceScope.SELECTED_DOCUMENTS, "document_ids": ["doc_other"]})
-    assert AuditSources(retrieval, restricted.source_policy).resolve("1", "Attention Is All You Need").status == "source_not_found"
 
 
 def test_older_run_cannot_override_newer_automatic_decision(tmp_path):

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { runAction, auditReport, startRunEvents, type SavedRun, type ResearchEvent } from "@/lib/api";
+import { runAction, startRunEvents, type SavedRun, type ResearchEvent } from "@/lib/api";
 import { isActive, runLabels } from "@/lib/conversations";
 import InlineAnswer from "./InlineAnswer";
 import ReportView from "./ReportView";
@@ -20,7 +20,7 @@ export default function RunCard({ run: saved, refresh, archived = false }: { run
     const stop = startRunEvents(saved.run_id, (event: ResearchEvent) => {
       if (!live) return;
       if (event.type === "answer_delta") { streamed += event.text; setStream({ id: saved.run_id, text: streamed }); }
-      if (["initializing_tools", "tool_unavailable", "research_started", "audit_started"].includes(event.type) && "message" in event) setNotice(event.message);
+      if (["initializing_tools", "tool_unavailable", "research_started"].includes(event.type) && "message" in event) setNotice(event.message);
       if (["run_finished", "run_cancelled", "run_interrupted", "waiting_for_user", "error", "cancel_requested"].includes(event.type)) sync();
       if (event.type === "connection_error") { setNotice(event.message); sync(); }
     }, saved.event_cursor);
@@ -46,6 +46,14 @@ export default function RunCard({ run: saved, refresh, archived = false }: { run
       {active && <button disabled={busy || saved.status === "cancel_requested"} className="ml-auto rounded-lg border border-border px-3 py-1 text-foreground" onClick={() => void action(() => runAction(saved.run_id, "cancel"))}>■ {saved.status === "cancel_requested" ? "正在停止…" : "停止生成"}</button>}
     </div>
     {active && <p className="text-sm text-muted-foreground">{saved.progress?.message || notice || "正在处理…"}</p>}
+    {!!saved.stage_usage && Object.keys(saved.stage_usage).length > 0 && <details className="text-xs text-muted-foreground">
+      <summary>阶段用量</summary><div className="overflow-x-auto"><table className="mt-2 w-full text-left">
+        <thead><tr><th>阶段</th><th>调用 / 失败</th><th>输入 / 输出 token</th><th>输入缓存</th><th>耗时</th></tr></thead>
+        <tbody>{Object.entries(saved.stage_usage).map(([stage, usage]) => <tr key={stage}>
+          <td>{stage}</td><td>{usage.calls} / {usage.failures}</td><td>{usage.input_tokens} / {usage.output_tokens}</td>
+          <td>{usage.cache_observed_tokens ? (100 * usage.cached_tokens / usage.cache_observed_tokens).toFixed(1) + "%" : "未提供"}</td><td>{usage.seconds.toFixed(1)}s</td>
+        </tr>)}</tbody></table></div>
+    </details>}
     {!!saved.progress?.tasks?.length && <details className="rounded-lg border border-border p-3 text-sm"><summary>研究进度（{saved.progress.tasks.filter(t => t.status === "completed").length}/{saved.progress.tasks.length}）</summary>
       {saved.progress.tasks.map(t => <p key={t.task_id} className="mt-2">{t.status === "completed" ? "✓" : "·"} {t.objective} · {t.status}</p>)}</details>}
     {answer && <InlineAnswer answer={answer} evidence={saved.result?.evidence || []} />}
@@ -57,10 +65,8 @@ export default function RunCard({ run: saved, refresh, archived = false }: { run
     {!active && !archived && saved.status !== "waiting_for_user" && <div className="flex gap-4 text-sm">
       {["partial", "interrupted", "failed", "cancelled"].includes(saved.status) && <>
         {saved.workflow === "deep_research" && <button disabled={busy || saved.restart_required} onClick={() => void action(() => runAction(saved.run_id, "resume"))}>继续研究</button>}
-        {saved.workflow === "citation_audit" && ["interrupted", "cancelled", "failed"].includes(saved.status) && <button disabled={busy || saved.restart_required} onClick={() => void action(() => runAction(saved.run_id, "resume"))}>继续核验</button>}
         <button disabled={busy} onClick={() => void action(() => runAction(saved.run_id, "restart"))}>重新执行</button>
       </>}
-      {saved.workflow === "deep_research" && saved.result?.report && <button disabled={busy} onClick={() => void action(() => auditReport(saved.run_id))}>核验报告引用</button>}
     </div>}
   </div>;
 }

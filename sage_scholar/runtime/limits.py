@@ -18,7 +18,15 @@ def execution_budget(workflow, requested=None):
     kind = str(workflow)
     defaults = {'direct': {'max_total_tokens': 50_000, 'max_seconds': 300, 'max_tool_calls': 0},
                 'qa': {'max_total_tokens': 300_000, 'max_seconds': 900, 'max_tool_calls': 0},
-                'citation_audit': {'max_total_tokens': 1_000_000, 'max_seconds': 1800, 'max_tool_calls': 120}}
+                'deep_research': {
+                    'max_total_tokens': 600_000,
+                    'report_reserve_tokens': 150_000,
+                    'max_tool_calls': 100,
+                    'max_steps': 6,
+                    'max_rounds': 1,
+                    'max_tasks': 8,
+                    'max_writer_revisions': 1,
+                }}
     values = defaults.get(kind, {}).copy()
     for field in ExecutionLimits.model_fields:
         configured = os.getenv(f'SAGE_{kind.upper()}_{field.upper()}')

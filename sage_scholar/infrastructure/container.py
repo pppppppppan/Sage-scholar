@@ -17,8 +17,6 @@ from sage_scholar.memory import MemoryStore, MemoryService, MemoryRecall
 from sage_scholar.rag.embedding import Embedding
 from sage_scholar.memory.background import MemoryBackground
 from sage_scholar.memory.jobs import MemoryJobStore
-from sage_scholar.audit import CitationAuditService
-from sage_scholar.audit.fetch import AuditFetch
 
 from .model_gateway import LegacyModelGateway
 from .retrieval import LegacyRetrievalAdapter
@@ -56,10 +54,7 @@ class ApplicationContainer:
             store=self.run_store, checkpoints=self.checkpoints, context_manager=self.context_manager,
         )
         self.research_service = ResearchService(self.runtime_provider)
-        self.audit_service = CitationAuditService(self.retrieval, lambda: self.model_gateway.client,
-            AuditFetch(self.runtime_provider, self.retrieval, self.run_store).for_request,
-            checkpoints=self.checkpoints, run_lookup=self.run_manager.get)
-        self.runners = {Workflow.DEEP_RESEARCH: self.research_service, Workflow.CITATION_AUDIT: self.audit_service}
+        self.runners = {Workflow.DEEP_RESEARCH: self.research_service}
         self.run_manager.register_runners(self.runners)
         self.document_service = DocumentService(
             self.runtime_provider,

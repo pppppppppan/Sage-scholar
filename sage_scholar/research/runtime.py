@@ -23,7 +23,8 @@ from sage_scholar.infrastructure.json_store import write_json
 from .budget import ResearchBudget, BudgetedTool
 from .evidence_context import ResearchEvidenceContext
 from .gap_review import GapReviewer
-from .verification import CitationVerifier
+from .synthesis import ResearchSynthesis
+from .report_review import ReportReviewer
 from sage_scholar.infrastructure.retrieval import LegacyRetrievalAdapter
 from sage_scholar.tools.policy import EvidenceTool
 from sage_scholar.graph import build_graph
@@ -121,8 +122,10 @@ class ResearchRuntime:
                 )
 
             def wrap(tool):
+                from sage_scholar.runtime.metrics import MeasuredTool
                 if tool.source_access == "public":
                     tool = EvidenceTool(tool, self.retrieval.evidence_store, record, observe)
+                tool = MeasuredTool(tool)
                 tool = BudgetedTool(tool, budget)
                 if durable:
                     def replay(result):
@@ -184,13 +187,14 @@ class ResearchRuntime:
         graph = build_graph(
             supervisor, create_researcher, writer,
             gap_reviewer=GapReviewer(review_llm, context),
-            verifier=CitationVerifier(review_llm, context), budget=budget,
+            synthesizer=ResearchSynthesis(self.llm_client, context),
+            report_reviewer=ReportReviewer(review_llm, context), budget=budget,
             checkpointer=self.checkpoints.saver if durable else None,
             interaction=(lambda req: assess(req, self.llm_client)) if durable else None,
         )
         final_report = None
         graph_config = self.checkpoints.config(request.run_id) if durable else {}
-        graph_config["recursion_limit"] = 20 + 3 * contract.limits.max_tasks * (contract.limits.max_rounds + 1)
+        graph_config["recursion_limit"] = 250 + 3 * contract.limits.max_tasks * (contract.limits.max_rounds + 1)
         snapshot = graph.get_state(graph_config) if durable else None
         if durable and snapshot:
             snapshot = continue_graph(graph, graph_config, snapshot, request, contract.limits)
@@ -199,14 +203,14 @@ class ResearchRuntime:
         if snapshot and snapshot.values and not snapshot.next:
             final_report = snapshot.values.get("report_result")
             if final_report:
-                yield {"render_node": {"report_result": final_report}}
+                yield {"finalize_node": {"report_result": final_report}}
         else:
             for _mode, event in graph.stream(graph_input, config=graph_config,
                                             stream_mode=["updates", "custom"], **({"durability": "sync"} if durable else {})):
                 if cancelled():
                     raise WorkflowInterrupted("研究已中断，checkpoint 已保留")
-                if "render_node" in event:
-                    final_report = event["render_node"]["report_result"]
+                if "finalize_node" in event:
+                    final_report = event["finalize_node"]["report_result"]
                 yield event
         yield {"evidence_node": {"evidence_ids": context.ids()}}
         yield {"outcome_node": {
@@ -243,7 +247,7 @@ class ResearchRuntime:
                               "unavailable": "tool_unavailable", "started": "research_started"}[output["status"]]
                 events.append((event_type, output))
             elif node_name == "progress_node":
-                events.append((output["event"], {"phase": output["phase"]}))
+                events.append((output["event"], {key: value for key, value in output.items() if key != "event"}))
             elif node_name in {"policy_node", "evidence_node", "outcome_node"}:
                 name = {"policy_node": "source_policy", "evidence_node": "evidence", "outcome_node": "outcome"}[node_name]
                 events.append((name, output))
@@ -257,7 +261,7 @@ class ResearchRuntime:
             elif node_name == "dispatch_node":
                 for identity in output["ready_tasks"]:
                     events.append(("research_task_started", {"task_id": identity}))
-            elif node_name == "research_node":
+            elif node_name in {"research_node", "section_sources_node"}:
                 for note in output["research_notes"].values():
                     events.append(("research", {
                         "question": note.question, "preview": "; ".join(f.text for f in note.findings)[:150],
@@ -271,12 +275,12 @@ class ResearchRuntime:
                                           "missing_dimensions": "; ".join(review.gaps)}))
                 events.append(("gap_reviewed", review.model_dump()))
             elif node_name == "write_node":
-                events.append(("report_drafting", {"phase": "completed", "claim_count": len(output["draft"].claims)}))
-            elif node_name == "verify_node":
-                events.append(("citation_verifying", {"phase": "completed", **output["verification_result"].model_dump()}))
-            elif node_name == "revision_node":
-                events.append(("report_revising", {"revision": output["writer_revision"]}))
-            elif node_name == "render_node":
+                events.append(("report_drafting", {"phase": "section_completed", "section_index": output["section_index"]}))
+            elif node_name == "report_review_node":
+                events.append(("report_reviewing", {"phase": "section_completed"}))
+            elif node_name == "revise_section_node":
+                events.append(("report_revising", {"phase": "section_completed"}))
+            elif node_name == "finalize_node":
                 result = output["report_result"].model_dump(mode="json")
                 events.append(("write", result))
                 events.append(("report_completed", {"citations": result["citations"],

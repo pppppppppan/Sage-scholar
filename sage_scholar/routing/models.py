@@ -10,7 +10,7 @@ class Workflow(StrEnum):
     QA = "qa"
     SEARCH = "search"
     DEEP_RESEARCH = "deep_research"
-    CITATION_AUDIT = "citation_audit"
+    CITATION_AUDIT = "citation_audit"  # Read-only decoding of historical runs; Router rejects new requests.
     PAPER2CODE = "paper2code"
 
 

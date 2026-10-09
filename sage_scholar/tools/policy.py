@@ -38,8 +38,11 @@ class EvidenceTool(BaseTool):
         return self._tool.to_schema()
 
     def run_tool(self, parameters):
+        from sage_scholar.runtime.journal import WorkflowInterrupted
         try:
             result = self._tool.run_tool(parameters)
+        except WorkflowInterrupted:
+            raise
         except Exception as exc:
             self._observe({"tool": self.name, "parameters": parameters, "text": str(exc),
                            "evidence_ids": [], "kind": "error"})
@@ -78,4 +81,4 @@ class EvidenceTool(BaseTool):
             return "\n\n".join(chunks)
         observation["kind"] = "error" if failed else "discovery_or_status"
         self._observe(observation)
-        return "[Observation: 尚不能作为最终报告证据；请读取来源原文]\n" + result
+        return ("Error: 工具未返回可用结果\n" if failed else "[Observation: 尚不能作为最终报告证据；请读取来源原文]\n") + result

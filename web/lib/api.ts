@@ -144,8 +144,7 @@ export type ResearchEvent =
   | { type: "waiting_for_user"; interrupts: HumanQuestion[] }
   | { type: "cancel_requested" }
   | { type: "connection_error"; message: string }
-  | { type: "initializing_tools" | "research_started" | "audit_started"; message: string }
-  | { type: "audit_claim_checked"; claim: { claim_id: string }; support_status: string; citation_status?: "present" | "missing" }
+  | { type: "initializing_tools" | "research_started"; message: string }
   | { type: "tool_available" | "tool_unavailable"; server: string; message: string; reason?: string | null }
   | { type: "plan"; sub_questions: { label: string; question: string }[] }
   | { type: "research"; question: string; preview: string; tool_call_counts: Record<string, number>; status?: "completed" | "failed" }
@@ -155,9 +154,7 @@ export type ResearchEvent =
   | { type: "research_task_started"; task_id: string }
   | { type: "research_task_completed"; note: { task_id: string; evidence_ids: string[]; unknowns: string[]; conflicts: string[] } }
   | { type: "gap_reviewed"; covered: string[]; missing: string[]; unknowns: string[]; conflicts: string[] }
-  | { type: "report_drafting"; phase: "started" | "completed"; claim_count?: number }
-  | { type: "citation_verifying"; phase: "started" | "completed" }
-  | { type: "report_revising"; revision: number }
+  | { type: "research_synthesizing" | "report_drafting" | "report_reviewing" | "report_revising"; phase: string; section?: string; section_index?: number }
   | { type: "report_completed"; citations: Record<string, string>; remaining_gaps: string[] }
   | { type: "stats"; total_calls: number; prompt_tokens: number; completion_tokens: number; total_tokens: number }
   | { type: "run_finished"; status: "completed" | "partial"; reason: string | null; remaining_gaps: string[] }
@@ -271,13 +268,14 @@ export interface SavedRun {
   workflow: Workflow;
   query: string;
   status: "pending" | "running" | "waiting_for_user" | "cancel_requested" | "completed" | "partial" | "failed" | "cancelled" | "interrupted";
-  result: { report?: string; answer?: string; evidence?: EvidenceRef[]; citations?: Record<string,string>; audit_items?: unknown[] } | null;
+  result: { report?: string; answer?: string; evidence?: EvidenceRef[]; citations?: Record<string,string> } | null;
   error: string | null;
   reason: string | null;
   remaining_gaps: string[];
   restart_required: boolean;
   event_cursor: number;
   consumed_budget: Record<string, number>;
+  stage_usage?: Record<string, { calls: number; failures: number; input_tokens: number; output_tokens: number; cached_tokens: number; cache_observed_tokens: number; cache_miss_tokens: number; seconds: number }>;
 }
 
 export async function getRun(runId: string): Promise<SavedRun> {
@@ -288,11 +286,6 @@ export async function listRuns(): Promise<SavedRun[]> {
 }
 export async function runAction(runId: string, action: "resume" | "restart" | "cancel"): Promise<SavedRun> {
   return (await expectJson<{ run: SavedRun }>(await fetch(`${API_BASE}/api/runs/${encodeURIComponent(runId)}/${action}`, { method: "POST" }))).run;
-}
-export async function auditReport(runId: string): Promise<SavedRun> {
-  return (await expectJson<{ run: SavedRun }>(await fetch(`${API_BASE}/api/audits`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ report_run_id: runId }),
-  }))).run;
 }
 export async function listMemories(workspaceId = "default", sessionId?: string): Promise<SavedMemory[]> {
   const params = new URLSearchParams({ workspace_id: workspaceId, include_inactive: "true" });

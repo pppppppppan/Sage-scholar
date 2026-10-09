@@ -7,9 +7,8 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from sage_scholar.domain import research, execution
 from sage_scholar.routing import models
-from sage_scholar.audit import models as audit_models
 
-SCHEMAS = {"deep_research": "research-v4-1", "citation_audit": "audit-v4.1-1"}
+SCHEMAS = {"deep_research": "research-markdown-v1"}
 
 
 class Checkpoints:
@@ -18,7 +17,7 @@ class Checkpoints:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.execute("PRAGMA synchronous=FULL")
-        allowed = [(module.__name__, name) for module in (research, execution, models, audit_models)
+        allowed = [(module.__name__, name) for module in (research, execution, models)
                    for name, value in vars(module).items() if isinstance(value, type) and issubclass(value, (BaseModel, Enum)) and value.__module__ == module.__name__]
         self.saver = SqliteSaver(self.conn, serde=JsonPlusSerializer(allowed_msgpack_modules=allowed, pickle_fallback=False))
         self.saver.setup()
@@ -33,7 +32,7 @@ class Checkpoints:
                 "checkpoint_id": checkpoint.config["configurable"]["checkpoint_id"] if checkpoint else None}
 
     def compatible(self, snapshot):
-        if snapshot.schema_version != 4 or snapshot.checkpoint.get("schema") != SCHEMAS.get(str(snapshot.workflow)):
+        if str(snapshot.workflow) not in SCHEMAS or snapshot.schema_version != 4 or snapshot.checkpoint.get("schema") != SCHEMAS.get(str(snapshot.workflow)):
             return False
         try:
             return self.saver.get_tuple(self.config(snapshot.run_id)) is not None

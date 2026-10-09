@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import MarkdownContent from "@/components/MarkdownContent";
-import { saveReport } from "@/lib/api";
+import { saveReport, API_BASE } from "@/lib/api";
+import { linkReportCitations } from "@/lib/markdown";
 
 interface ReportViewProps {
   report: string;
@@ -37,10 +38,7 @@ function processReport(raw: string): ProcessedReport {
   const body = raw.slice(0, splitIdx);
   const sourcesText = raw.slice(splitIdx + heading.length).trim();
 
-  const processedBody = body.replace(
-    /\[(\d+)\](?!\()/g,
-    '[$1](#source-$1)',
-  );
+  const processedBody = linkReportCitations(body);
 
   const sources: SourceItem[] = [];
   for (const line of sourcesText.split("\n")) {
@@ -48,7 +46,7 @@ function processReport(raw: string): ProcessedReport {
     if (!trimmed) continue;
     const m = trimmed.match(/^\[(\d+)\]/);
     if (m) {
-      sources.push({ id: m[1], text: trimmed });
+      sources.push({ id: m[1], text: trimmed.replace(/\]\(\/api\/evidence\//g, "](" + API_BASE + "/api/evidence/") });
     }
   }
 

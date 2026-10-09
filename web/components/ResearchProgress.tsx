@@ -81,7 +81,6 @@ export default function ResearchProgress({
   useEffect(() => {
     const abort = startRunEvents(runId, (event: ResearchEvent) => {
       switch (event.type) {
-        case "audit_started":
         case "initializing_tools":
           setInitialization({ message: event.message, ready: false, tools: {} });
           break;
@@ -91,9 +90,6 @@ export default function ResearchProgress({
             message: prev?.message || "正在初始化研究工具…", ready: false,
             tools: { ...prev?.tools, [event.server]: { available: event.type === "tool_available", message: event.message } },
           }));
-          break;
-        case "audit_claim_checked":
-          setInitialization((prev) => ({ message: `已核验 ${event.claim.claim_id}：${event.citation_status === "missing" ? "缺少引用" : event.support_status}`, ready: true, tools: prev?.tools || {} }));
           break;
         case "research_started":
           setInitialization((prev) => ({ message: event.message, ready: true, tools: prev?.tools || {} }));
@@ -225,13 +221,10 @@ export default function ResearchProgress({
         }
 
         case "report_drafting":
-        case "citation_verifying":
+        case "research_synthesizing":
+        case "report_reviewing":
         case "report_revising": {
-          const phase = event.type === "report_revising"
-            ? `正在修订报告（第 ${event.revision} 次）`
-            : event.type === "citation_verifying"
-              ? (event.phase === "started" ? "正在逐条核验主张与证据" : "引用核验已完成")
-              : (event.phase === "started" ? "正在撰写研究报告" : "报告草稿已生成，准备核验引用");
+          const phase = ({ research_synthesizing: "正在综合研究发现", report_revising: "正在局部修订报告", report_reviewing: "正在审查报告内容", report_drafting: "正在分章节撰写报告" })[event.type] + (event.section ? `：${event.section}` : "");
           setNodes((prev) => {
             const next = [...prev];
             const index = next.findIndex((n) => n.kind === "write");

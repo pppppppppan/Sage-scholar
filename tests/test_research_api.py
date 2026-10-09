@@ -31,8 +31,7 @@ def test_research_api_citations_progress_and_partial(monkeypatch, tmp_path, libr
         def invoke(self, messages, tag, **kwargs):
             self.total_calls += 1
             if tag == "supervisor:plan":
-                result = {"sub_questions": [{"task_id": "T1", "label": "方法", "question": "Read Method",
-                    "rationale": "read original", "dimensions": ["methods"]}]}
+                result = {"analysis": "read original", "tasks": [{"task_id": "T1", "label": "方法", "objective": "Read Method", "dimensions": ["methods"], "completion_criteria": ["解释 Method A"]}]}
             elif tag.endswith(":react"):
                 if not any(message["role"] == "tool" for message in messages):
                     return ChatCompletionMessage(role="assistant", content=None, tool_calls=[{
@@ -43,21 +42,27 @@ def test_research_api_citations_progress_and_partial(monkeypatch, tmp_path, libr
                 payload = json.loads(messages[-1]["content"])
                 result = {"findings": [{"text": "Method A", "evidence_ids": payload["allowed_evidence_ids"],
                     "dimensions": ["methods"]}], "evidence_ids": payload["allowed_evidence_ids"]}
-            elif tag == "research:gap_review":
+            elif tag == "supervisor:gap_review":
                 result = {"covered": ["methods"]}
-            elif tag.startswith("writer:"):
+            elif tag == "synthesis:combine":
                 payload = json.loads(messages[-1]["content"])
-                ids = [item["evidence_id"] for item in payload["evidence"]]
-                assert all(item["document_id"] == a.document_id for item in payload["evidence"])
-                result = {"title": "Research Report", "claims": [{"claim_id": "C1", "text": "Method A", "evidence_ids": ids}]}
-                if unsupported:
-                    result["claims"].append({"claim_id": "C2", "text": "A scores 100%", "evidence_ids": ids})
-            elif tag == "research:verify_claim":
+                result = {"blocks": [{"heading": "方法", "analysis": "原文介绍 Method A，实验细节未提供。",
+                    "evidence_ids": [item["evidence_id"] for item in payload["evidence"]]}]}
+            elif tag == "writer:outline":
+                result = {"title": "Research Report", "sections": [{"section_id": "s1", "heading": "方法",
+                    "objective": "解释方法", "block_indices": [0]}]}
+            elif tag in {"writer:section", "writer:revise_section"}:
                 payload = json.loads(messages[-1]["content"])
-                text = payload["claim"]["text"]
-                assert payload["evidence"] and "SECRET B" not in str(payload["evidence"])
-                result = {"status": "supported" if text == "Method A" else "unsupported",
-                          "reason": "method is named" if text == "Method A" else "no numeric result in source"}
+                assert all(item["document_id"] == a.document_id for item in payload["sources"])
+                result = "Method A [1]。实验结果未提供。"
+                if unsupported and tag == "writer:section":
+                    result += "A scores 100%"
+            elif tag == "report_review:section":
+                payload = json.loads(messages[-1]["content"])
+                assert payload["sources"] and "SECRET B" not in str(payload["sources"])
+                bad = "A scores 100%" in payload["section"]["markdown"]
+                result = {"acceptable": not bad, "issues": ["实验数字缺少支持"] if bad else [],
+                          "revision_instructions": "删除没有来源的数字"}
             else:
                 raise AssertionError(tag)
             return ChatCompletionMessage(role="assistant", content=json.dumps(result) if isinstance(result, dict) else result)
@@ -86,17 +91,18 @@ def test_research_api_citations_progress_and_partial(monkeypatch, tmp_path, libr
         run_id = response.json()["run_id"]
         sse = client.get(f"/api/runs/{run_id}/events").text
         assert "event: research_planned" in sse and "event: research_task_completed" in sse
-        assert "event: citation_verifying" in sse and "event: write" in sse and "event: run_finished" in sse
+        assert "event: report_reviewing" in sse and "event: write" in sse and "event: run_finished" in sse
         assert '"phase": "started"' in sse
         snapshot = client.get(f"/api/runs/{run_id}").json()["run"]
-        assert snapshot["status"] == ("partial" if unsupported else "completed"), snapshot
+        assert snapshot["status"] == "completed", snapshot
         result = snapshot["result"]
         assert result["citations"] and "Method A [1]" in result["report"]
         assert "A scores 100%" not in result["report"]
         assert not any("工具调用预算" in gap for gap in snapshot["remaining_gaps"])
         assert '"blocked_by_budget": false' in sse
-        assert bool(snapshot["remaining_gaps"]) == unsupported
-        assert bool(result["removed_claim_ids"]) == unsupported
+        assert snapshot["remaining_gaps"] == []
+        assert ("event: report_revising" in sse) == unsupported
+        assert "removed_claim_ids" not in result
         for identity in result["citations"].values():
             evidence = client.get("/api/evidence/" + identity)
             assert evidence.status_code == 200

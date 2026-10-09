@@ -8,8 +8,8 @@ from sage_scholar.domain.execution import ExecutionRequest
 from sage_scholar.research.runtime import ResearchRuntime
 from sage_scholar.routing import ExecutionMode, SourceScope, Workflow
 from test_document_evidence import library
-from research_fakes import FakeSupervisor, SupportedVerifier
-from sage_scholar.domain.research import Claim, Finding, GapReview, FollowUp, ReportDraft, ResearchNote
+from research_fakes import FakeSupervisor, FakeWriter, FakeSynthesis, SupportedReview
+from sage_scholar.domain.research import Finding, GapReview, FollowUp, ResearchNote
 from test_source_policy import ExternalTool
 
 
@@ -31,9 +31,6 @@ def build_runtime(monkeypatch, tmp_path, adapter, scope, ids, approved=True):
                 return GapReview()
             return GapReview(missing=["实验结果未核验"], next_tasks=[FollowUp(
                 task_id="T1", objective="补充实验结果")])
-    class Verifier(SupportedVerifier):
-        def __init__(self, *args):
-            pass
     class Researcher:
         def __init__(self, tool_list, **kwargs):
             self.tools = {tool.name: tool for tool in tool_list}
@@ -50,18 +47,15 @@ def build_runtime(monkeypatch, tmp_path, adapter, scope, ids, approved=True):
                 assert "Method A" in content and "SECRET B" not in content
             return ResearchNote(task_id=task.task_id, question=task.objective, revision=task.revision,
                 evidence_ids=self.ids(), findings=[Finding(text="source finding", evidence_ids=self.ids())])
-    class Writer:
-        def __init__(self, **kwargs):
-            pass
-        def run(self, contract, notes, **kwargs):
-            assert not contract.source_policy.permits_web or scope == SourceScope.PUBLIC
-            return ReportDraft(title="report", claims=[Claim(claim_id="C1", text="source finding",
-                evidence_ids=notes[0].evidence_ids)])
+    class Writer(FakeWriter):
+        def outline(self, contract, synthesis):
+            return super().outline(contract, synthesis).model_copy(update={"title": "report"})
     monkeypatch.setattr(module, "Supervisor", Supervisor)
     monkeypatch.setattr(module, "Researcher", Researcher)
     monkeypatch.setattr(module, "Writer", Writer)
     monkeypatch.setattr(module, "GapReviewer", Review)
-    monkeypatch.setattr(module, "CitationVerifier", Verifier)
+    monkeypatch.setattr(module, "ResearchSynthesis", FakeSynthesis)
+    monkeypatch.setattr(module, "ReportReviewer", SupportedReview)
     def forbidden_connect(*args):
         raise AssertionError("Offline Research must not connect any MCP server")
     monkeypatch.setattr(module, "create_mcp_clients", forbidden_connect)
@@ -149,4 +143,4 @@ def test_targeted_retry_keeps_selected_documents_and_no_web(monkeypatch, tmp_pat
                for note in notes for identity in note.evidence_ids)
     public = [kind for event in events for kind, _ in runtime.to_public_events(event)]
     assert {"research_planned", "research_task_started", "research_task_completed", "gap_reviewed",
-            "report_drafting", "citation_verifying", "report_completed", "write"} <= set(public)
+            "report_drafting", "report_reviewing", "report_completed", "write"} <= set(public)

@@ -45,7 +45,7 @@ def test_offline_research_never_loads_web_even_in_external_capable_runtime(monke
     runtime._connect_external, runtime._tools_initialized = True, False
     monkeypatch.setattr("sage_scholar.research.runtime.iter_mcp_clients", forbidden)
     events = list(runtime.run_research(request))
-    assert any("render_node" in event for event in events)
+    assert any("finalize_node" in event for event in events)
     assert runtime.mcp_clients == []
 
 

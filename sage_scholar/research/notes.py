@@ -1,4 +1,5 @@
 from sage_scholar.domain.research import ResearchNote
+from .note_view import sanitize_note
 
 
 def validate_note(note: ResearchNote, context, allowed_ids) -> ResearchNote:
@@ -24,4 +25,4 @@ def validate_note(note: ResearchNote, context, allowed_ids) -> ResearchNote:
             note.unknowns.append(f"缺少来源支持：{finding.text}")
     note.unknowns = list(dict.fromkeys(note.unknowns))
     note.metadata["validation_issues"] = list(dict.fromkeys(issues))
-    return note
+    return sanitize_note(note)

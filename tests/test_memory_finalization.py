@@ -212,11 +212,9 @@ def test_deleted_memory_receipt_cannot_be_replayed_after_restart(tmp_path):
 
 def test_memory_with_provenance_still_not_a_citation_source(tmp_path):
     from sage_scholar.research.evidence_context import ResearchEvidenceContext
-    from sage_scholar.research.verification import CitationVerifier
-    from sage_scholar.domain.research import Claim, ReportDraft
+    from sage_scholar.research.references import reference_catalog
     store, service, _ = memory(tmp_path)
     saved = store.add(value('FNO 比 PINN 好'))
     context = ResearchEvidenceContext(JsonEvidenceStore(str(tmp_path)),contract().source_policy)
-    result = CitationVerifier(ScriptedLLM(),context).verify(ReportDraft(title='x',claims=[
-        Claim(claim_id='C1',text='FNO always wins',evidence_ids=[saved.memory_id])]))
-    assert result.claims[0].identity_valid is False
+    with pytest.raises(ValueError):
+        reference_catalog(context, [saved.memory_id])

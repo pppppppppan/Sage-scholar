@@ -140,13 +140,14 @@ class LLMClient:
         if tool_choice is None:
             tool_choice = "auto" if tools else None
         prepared = self.context_manager.prepare(messages, tools=tools, tool_choice=tool_choice,
-                                                 output_reserve=max_tokens, include_memory=tag != "research:verify_claim" and not tag.startswith("memory:"),
+                                                 output_reserve=max_tokens, include_memory=not tag.startswith(("report_review:", "memory:")),
                                                  summarize=self.summarize_history, purpose=tag,
                                                  summary_mode=tag == "context:compress")
         messages = prepared.messages
         logger.info("[Context:%s] %s", tag, prepared.accounting)
         control = CURRENT_CONTROL.get()
         lease = control.reserve_model(prepared.accounting["total_tokens"], purpose=tag) if control else None
+        started = time.monotonic()
         try:
             check_control()
             if self._is_claude:
@@ -166,6 +167,12 @@ class LLMClient:
                         time.time() - start, tag, result, cached_tokens=cached_input(response.usage))
             check_control()
             return result
+        except Exception as exc:
+            from sage_scholar.runtime.journal import WorkflowInterrupted
+            from sage_scholar.runtime.metrics import model_stage, record_stage
+            if not isinstance(exc, WorkflowInterrupted):
+                record_stage(model_stage(tag), seconds=time.monotonic() - started, failed=True)
+            raise
         finally:
             if control:
                 control.release_model(lease)
@@ -309,6 +316,9 @@ class LLMClient:
     # ---- shared ----
 
     def _track_usage(self, prompt_tokens, completion_tokens, elapsed, tag, msg, cached_tokens=None):
+        from sage_scholar.runtime.metrics import model_stage, record_stage
+        record_stage(model_stage(tag), prompt=prompt_tokens, completion=completion_tokens,
+                     cached=cached_tokens, seconds=elapsed)
         self.total_prompt_tokens += prompt_tokens
         self.total_completion_tokens += completion_tokens
         self.total_calls += 1

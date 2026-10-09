@@ -1,304 +1,35 @@
-from sage_scholar.context.protection import prompt_contract
-import json
-import json_repair
-import logging
-from typing import Literal
-
-from openai.types.chat import ChatCompletionMessage
+"""Plan research questions; evidence coverage review lives in research.gap_review."""
 from pydantic import BaseModel, Field
-
-from ..base import AgentBase, llm_client, Message
-from .prompts import (
-    SUPERVISOR_SYSTEM,
-    SUPERVISOR_PLAN_USER,
-    SUPERVISOR_REPLAN_USER,
-    SUPERVISOR_REVIEW_USER,
-    SUPERVISOR_COVERED_SECTION,
-)
-
-logger = logging.getLogger(__name__)
+from sage_scholar.domain.research import ResearchTask
+from sage_scholar.context.protection import prompt_contract
+from sage_scholar.research.structured import structured_response
+from sage_scholar.research.materials import encoded
 
 
-class SubQuestion(BaseModel):
-    task_id: str | None = None
-    dependencies: list[str] = Field(default_factory=list)
-    dimensions: list[str] = Field(default_factory=list)
-    label: str = Field(description="Short label (under 20 chars) capturing the core topic. For frontend display.")
-    question: str = Field(description="The research sub-question.")
-    rationale: str = Field(description="Why this sub-question deserves separate investigation.")
+class ResearchPlan(BaseModel):
+    analysis: str
+    tasks: list[ResearchTask] = Field(min_length=1, max_length=12)
 
 
-class NoteReview(BaseModel):
-    relevance: str = Field(default="", description="Evidence for relevance criterion.")
-    depth: str = Field(default="", description="Evidence for depth criterion.")
-    citations: str = Field(default="", description="Evidence for citation density criterion.")
-    sources: str = Field(default="", description="Evidence for source diversity criterion.")
-    completeness: str = Field(default="", description="Evidence for completeness criterion.")
-    verdict: Literal["approved", "retry", "revise"] = Field(
-        description="Derived from evidence using the decision tree in instructions."
-    )
-
-    def failed_criteria(self) -> str:
-        if self.verdict == "approved":
-            return ""
-        fields = {
-            "relevance": self.relevance,
-            "depth": self.depth,
-            "citations": self.citations,
-            "sources": self.sources,
-            "completeness": self.completeness,
-        }
-        return "\n".join(f"{k}: {v}" for k, v in fields.items() if v)
-
-
-class ReviewResult(BaseModel):
-    note_reviews: list[NoteReview]
-    missing_dimensions: str = ""
-
-
-class Supervisor(AgentBase):
-    """
-    研究流水线的管理者，负责规划和审查两个阶段。
-    plan() 将研究简报拆分为子问题分配给 Researcher，review() 审查研究结果并决定通过、重试或补充规划。
-    """
-
-    def __init__(
-        self,
-        llm: llm_client,
-        max_steps: int,
-        name: str = "supervisor",
-        system_prompt: str = SUPERVISOR_SYSTEM,
-        plan_user_prompt: str = SUPERVISOR_PLAN_USER,
-        review_llm: llm_client | None = None,
-    ):
-        super().__init__(name, llm, system_prompt)
-        self.max_steps = max_steps
-        self.plan_user_prompt = plan_user_prompt
-        self.review_llm = review_llm
-
-        subquestion_schema = SubQuestion.model_json_schema()
-        self.output_schema = {
-            "type": "function",
-            "function": {
-                "name": "create_research_plan",
-                "description": "Analyze dimensions first, then submit research sub-questions.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "analysis": {
-                            "type": "string",
-                            "description": "Dimension analysis and coverage planning. List all dimensions the brief spans, then explain how your sub-questions cover them without overlap. Fill this BEFORE sub_questions.",
-                        },
-                        "sub_questions": {"type": "array", "items": subquestion_schema},
-                    },
-                    "required": ["analysis", "sub_questions"],
-                },
-            },
-        }
-
-        note_review_schema = NoteReview.model_json_schema()
-        self.review_schema = {
-            "type": "function",
-            "function": {
-                "name": "submit_review",
-                "description": "Submit review results for all research note pairs. One review per pair, in input order.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "note_reviews": {"type": "array", "items": note_review_schema},
-                        "missing_dimensions": {
-                            "type": "string",
-                            "description": "Uncovered dimensions of the research brief, or empty string.",
-                        },
-                    },
-                    "required": ["note_reviews"],
-                },
-            },
-        }
-
-    def run(self, prompt: str, **kwargs) -> str:
-        raise NotImplementedError("Supervisor uses plan() and review(), not run()")
-
-    def _parse_tool_response(
-        self, response: ChatCompletionMessage, expected_func: str, wrap_key: str | None = None
-    ) -> dict:
-        """
-        从 LLM 响应中提取结构化结果。
-        优先从 tool_calls 解析；若模型未返回 tool_call（弱模型常见），
-        则从 content 中解析 JSON，依次处理 markdown 代码块、函数名前缀、裸数组包装。
-        """
-        if response.tool_calls:
-            raw = response.tool_calls[0].function.arguments
-        else:
-            raw = response.content.strip()
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-            if raw.startswith(expected_func):
-                raw = raw[len(expected_func) :].strip()
-
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError as e:
-            logger.warning("[Supervisor] JSON 解析失败 (pos %d): %s，尝试修复", e.pos, e.msg)
-            parsed = json_repair.loads(raw)
-
-        if wrap_key and not response.tool_calls and isinstance(parsed, list):
-            return {wrap_key: parsed}
-        return parsed
-
-    def _record_response(self, response: ChatCompletionMessage, result: dict):
-        """
-        将 LLM 响应追加到 _history。
-        tool_call 模式记录 assistant(tool_calls) + tool(result) 两条消息；
-        fallback 模式作为普通 assistant 消息记录。
-        """
-        if response.tool_calls:
-            tc = response.tool_calls[0]
-            fixed_tc = tc.model_dump()
-            fixed_tc["function"]["arguments"] = json.dumps(result, ensure_ascii=False)
-            self._history.append(Message(
-                content=response.content,
-                role="assistant",
-                tool_calls=[fixed_tc],
-            ))
-            self._history.append(Message(
-                content=json.dumps(result, ensure_ascii=False),
-                role="tool",
-                tool_call_id=tc.id,
-            ))
-        else:
-            self._history.append(Message(
-                content=response.content,
-                role="assistant",
-            ))
-
-    def plan(
-        self,
-        research_brief: str,
-        approved_pairs: list[tuple[str, str]] | None = None,
-        review_result: ReviewResult | None = None,
-    ) -> list[SubQuestion]:
-        """
-        将研究简报拆分为可独立执行的子问题，通过 function calling 输出结构化结果。
-        当 review_result 有值时进入补充规划模式，仅生成填补缺口的子问题。
-        """
-
-        if review_result is None:
-            prompt = self.plan_user_prompt.format(research_brief=research_brief, max_steps=self.max_steps)
-        else:
-            approved_str = "\n".join(
-                f"- {q}" for q, _ in approved_pairs
-            ) if approved_pairs else ""
-
-            revision_points = []
-            for nr in review_result.note_reviews:
-                if nr.verdict == "revise":
-                    feedback = nr.failed_criteria()
-                    if feedback:
-                        revision_points.append(feedback)
-            if review_result.missing_dimensions:
-                revision_points.append(review_result.missing_dimensions)
-            revision_str = "\n".join(f"- {rp}" for rp in revision_points)
-
-            prompt = SUPERVISOR_REPLAN_USER.format(
-                research_brief=research_brief,
-                approved_questions=approved_str,
-                revision_points=revision_str,
-                max_steps=self.max_steps,
-            )
-
-        brief_msg = Message(content=prompt, role="user")
-        self._history.append(brief_msg)
-        messages = self._build_messages()
-
-        invoke_kwargs = dict(messages=messages, tool_choice="required",
-                              tools=[self.output_schema], tag="supervisor:plan")
-        try:
-            response = self.llm.invoke(**invoke_kwargs)
-            result = self._parse_tool_response(
-                response, "create_research_plan", wrap_key="sub_questions"
-            )
-        except (json.JSONDecodeError, ValueError):
-            logger.warning("[Supervisor] plan JSON 修复失败，重试一次")
-            response = self.llm.invoke(**invoke_kwargs)
-            result = self._parse_tool_response(
-                response, "create_research_plan", wrap_key="sub_questions"
-            )
-        self._record_response(response, result)
-
-        sub_questions = [SubQuestion(**item) for item in result["sub_questions"]]
-        logger.info("[Supervisor] plan: 生成 %d 个子问题", len(sub_questions))
-        return sub_questions
-
-    def review(
-        self,
-        research_brief: str,
-        pending_review_pairs: list[tuple[str, str]],
-        approved_pairs: list[tuple[str, str]] | None = None,
-    ) -> ReviewResult:
-        """
-        逐条审查 (子问题, 研究笔记) 配对，通过 function calling 输出结构化审查结果。
-        每条配对获得 approved/retry/revise 判定，同时评估整体是否有遗漏维度。
-        """
-
-        if approved_pairs:
-            items = "\n".join(f"- {q}" for q, _ in approved_pairs)
-            covered_section = SUPERVISOR_COVERED_SECTION.format(approved_questions=items)
-        else:
-            covered_section = ""
-
-        if pending_review_pairs:
-            items = "\n".join(
-                f"<pair>\n<sub_question>\n{sub_q}\n</sub_question>\n<research_note>\n{note}\n</research_note>\n</pair>"
-                for sub_q, note in pending_review_pairs
-            )
-            pairs = f"<pairs_to_review>\n{items}\n</pairs_to_review>"
-        else:
-            pairs = ""
-
-        prompt = SUPERVISOR_REVIEW_USER.format(
-            research_brief=research_brief,
-            covered_section=covered_section,
-            pairs=pairs,
-            pair_count=len(pending_review_pairs),
-        )
-
-        review_msg = Message(content=prompt, role="user")
-        self._history.append(review_msg)
-        messages = self._build_messages()
-
-        review_llm = self.review_llm or self.llm
-        invoke_kwargs = dict(messages=messages, tool_choice="required",
-                              tools=[self.review_schema], tag="supervisor:review")
-        try:
-            response = review_llm.invoke(**invoke_kwargs)
-            result = self._parse_tool_response(response, "submit_review", wrap_key="note_reviews")
-        except (json.JSONDecodeError, ValueError):
-            logger.warning("[Supervisor] review JSON 修复失败，重试一次")
-            response = review_llm.invoke(**invoke_kwargs)
-            result = self._parse_tool_response(response, "submit_review", wrap_key="note_reviews")
-        self._record_response(response, result)
-
-        review_result = ReviewResult(**result)
-        for i, nr in enumerate(review_result.note_reviews):
-            failed = nr.failed_criteria()
-            if failed:
-                logger.info("[Supervisor] review[%d]: %s | %s", i, nr.verdict, failed.replace("\n", ", "))
-            else:
-                logger.info("[Supervisor] review[%d]: %s (4/4 PASS)", i, nr.verdict)
-        if review_result.missing_dimensions:
-            logger.info("[Supervisor] missing_dimensions: %s", review_result.missing_dimensions)
-        return review_result
+class Supervisor:
+    def __init__(self, llm, max_steps, review_llm=None):
+        self.llm, self.max_steps = llm, max_steps
 
     def plan_tasks(self, contract):
-        from sage_scholar.domain.research import ResearchTask
-        questions = self.plan(json.dumps(prompt_contract(contract), ensure_ascii=False) + (
-            "\n以上契约中的 execution 是唯一资料约束，不得放宽。"
-            "每个子任务提供稳定 task_id（T1、T2…）、dependencies（依赖任务 ID）及 dimensions。"
-            "独立任务 dependencies=[] 以便并行；只有需要上游结果时声明依赖，不得循环。"
-            "dimensions 尽量使用契约中的维度名称，必须覆盖用户交付要求。"
-        ))
-        return [ResearchTask(
-            task_id=item.task_id or f"T{index}", objective=item.question,
-            label=item.label, dependencies=item.dependencies, dimensions=item.dimensions,
-        ) for index, item in enumerate(questions, 1)]
+        result = structured_response(self.llm, ResearchPlan, [
+            {"role": "system", "content": (
+                "规划科研调研，先分析用户真正要了解什么，再分解为相互补充、少量可执行的研究任务。"
+                "领域综述通常覆盖定义动机、代表方法与机制、实验与适用条件、局限和建议；"
+                "两论文比较围绕共同问题、方法、实验可比性与差异，不套空泛模板。"
+                "每个任务有唯一 task_id、简短 label、具体 objective、dimensions 和 completion_criteria。"
+                "完成标准描述需要解释的问题和原文证据，不是凑引用数量。"
+                "独立任务 dependencies=[]，需要前序结果才设置依赖；不得循环。"
+                "不能只是搜索不同关键词，不安排重复全局综述。status=pending，revision=0。"
+                "严格遵守资料权限与用户限制。"
+            )},
+            {"role": "user", "content": encoded({"contract": prompt_contract(contract),
+                "max_tasks": contract.limits.max_tasks, "steps_per_task": self.max_steps})},
+        ], tag="supervisor:plan", max_tokens=3500)
+        if len(result.tasks) > contract.limits.max_tasks:
+            raise ValueError("规划任务数量超过预算")
+        return [task.model_copy(update={"status": "pending", "revision": 0}) for task in result.tasks]

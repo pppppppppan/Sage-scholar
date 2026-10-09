@@ -22,6 +22,7 @@ class RunStore:
         CREATE TABLE IF NOT EXISTS calls (run_id TEXT, call_key TEXT, status TEXT NOT NULL, payload TEXT, PRIMARY KEY(run_id,call_key));
         CREATE TABLE IF NOT EXISTS results (run_id TEXT, result_key TEXT, payload TEXT NOT NULL, PRIMARY KEY(run_id,result_key));
         CREATE TABLE IF NOT EXISTS run_evidence (run_id TEXT, evidence_id TEXT, PRIMARY KEY(run_id,evidence_id));
+        CREATE TABLE IF NOT EXISTS stage_usage (run_id TEXT, stage TEXT, calls INTEGER DEFAULT 0, failures INTEGER DEFAULT 0, input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0, cached_tokens INTEGER DEFAULT 0, cache_observed_tokens INTEGER DEFAULT 0, seconds REAL DEFAULT 0, PRIMARY KEY(run_id,stage));
         ''')
         self.conn.commit()
         columns = {r[1] for r in self.conn.execute('PRAGMA table_info(budget)')}
@@ -106,6 +107,21 @@ class RunStore:
             reserved = self.conn.execute('SELECT COALESCE(SUM(tokens),0) FROM model_reservations WHERE run_id=?', (run_id,)).fetchone()[0]
             return used['prompt_tokens'] + used['completion_tokens'] + reserved
 
+    def record_stage(self, run_id, stage, *, prompt=0, completion=0, cached=None, seconds=0, failed=False):
+        with self.transaction() as db:
+            db.execute("INSERT OR IGNORE INTO stage_usage(run_id,stage) VALUES (?,?)", (run_id, stage))
+            db.execute("""UPDATE stage_usage SET calls=calls+1,failures=failures+?,
+                input_tokens=input_tokens+?,output_tokens=output_tokens+?,cached_tokens=cached_tokens+?,
+                cache_observed_tokens=cache_observed_tokens+?,seconds=seconds+? WHERE run_id=? AND stage=?""",
+                (int(failed), prompt, completion, min(prompt, max(0, cached or 0)),
+                 prompt if cached is not None else 0, seconds, run_id, stage))
+
+    def stages(self, run_id):
+        with self.lock:
+            rows = self.conn.execute("SELECT stage,calls,failures,input_tokens,output_tokens,cached_tokens,cache_observed_tokens,seconds FROM stage_usage WHERE run_id=?", (run_id,)).fetchall()
+        keys = ("calls", "failures", "input_tokens", "output_tokens", "cached_tokens", "cache_observed_tokens", "seconds")
+        return {row[0]: {**dict(zip(keys, row[1:])), "cache_miss_tokens": row[6] - row[5]} for row in rows}
+
     def result(self, run_id, key):
         with self.lock:
             row = self.conn.execute("SELECT payload FROM results WHERE run_id=? AND result_key=?", (run_id,key)).fetchone()
@@ -175,7 +191,7 @@ class RunStore:
 
     def purge_run(self, run_id):
         with self.transaction() as db:
-            for table in ('events','budget','calls','results','run_evidence','model_reservations'):
+            for table in ('events','budget','calls','results','run_evidence','model_reservations','stage_usage'):
                 db.execute(f'DELETE FROM {table} WHERE run_id=?', (run_id,))
             db.execute('DELETE FROM runs WHERE id=?', (run_id,))
 

@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 from sage_scholar.domain.execution import ExecutionRequest
 from sage_scholar.domain.research import (
-    Claim, ClaimVerification, Finding, GapReview, ReportDraft, ResearchContract,
-    ResearchNote, ResearchTask, VerificationResult,
+    Finding, GapReview, ResearchContract, ResearchNote, ResearchTask,
+    Synthesis, SynthesisBlock, ReportOutline, SectionPlan, WrittenSection, ReportReview,
 )
 from sage_scholar.routing import ExecutionMode, SourceScope, Workflow
 
@@ -47,11 +47,33 @@ class FakeResearcher:
             findings=[Finding(text="有证据支持的研究笔记。", evidence_ids=["ev_a"])], evidence_ids=["ev_a"])
 
 
+class FakeContext:
+    def get(self, identity):
+        if identity != "ev_a":
+            raise ValueError(identity)
+        return SimpleNamespace(source_id="https://example.org/paper", document_id=None,
+            source_version="v1", original_text="有证据支持的研究笔记。", metadata={"title": "研究论文"}, section="方法", page=None)
+
+
 class FakeWriter:
-    def run(self, contract, notes, **kwargs):
-        assert all(isinstance(note, ResearchNote) for note in notes)
-        return ReportDraft(title="最终报告", claims=[Claim(claim_id="C1",
-            text="有证据支持的研究笔记。", evidence_ids=["ev_a"])])
+    def __init__(self, *args, evidence_context=None, **kwargs):
+        self.context = evidence_context or FakeContext()
+
+    def outline(self, contract, synthesis):
+        return ReportOutline(title="最终报告", sections=[SectionPlan(section_id="S1", heading="方法与适用条件",
+            objective="解释机制与局限", block_indices=[0])])
+
+    def write_section(self, contract, synthesis, outline, plan, references, previous=None, **kwargs):
+        return WrittenSection(section_id=plan.section_id, heading=plan.heading,
+            markdown=f"有证据支持的研究笔记。[{next(iter(references))}]",
+            revision=previous.revision + 1 if previous else 0)
+
+
+class FakeSynthesis:
+    def __init__(self, *args): pass
+    def run(self, contract, materials, allowed_ids):
+        return Synthesis(blocks=[SynthesisBlock(heading="方法", analysis="比较方法的机制及适用范围。",
+            evidence_ids=allowed_ids)])
 
 
 class CompleteReview:
@@ -59,8 +81,7 @@ class CompleteReview:
         return GapReview()
 
 
-class SupportedVerifier:
-    def verify(self, draft):
-        return VerificationResult(claims=[ClaimVerification(claim_id=c.claim_id,
-            status="supported", identity_valid=True, reason="source supports claim", evidence_ids=c.evidence_ids)
-            for c in draft.claims])
+class SupportedReview:
+    def __init__(self, *args): pass
+    def review(self, *args):
+        return ReportReview(acceptable=True)
