@@ -84,7 +84,7 @@ def test_missing_or_incompatible_checkpoint_interrupts_instead_of_restarting(tmp
     checkpoints.close(); store.close()
 
 
-def test_committed_tool_results_and_notes_reused_unknown_calls_not_replayed(tmp_path):
+def test_committed_results_reused_and_manual_unknown_calls_not_replayed(tmp_path):
     store = RunStore(str(tmp_path))
     calls = []
     class Tool(BaseTool):
@@ -103,6 +103,57 @@ def test_committed_tool_results_and_notes_reused_unknown_calls_not_replayed(tmp_
     assert store.unknown_calls("run", mark=True) == [key]
     with pytest.raises(UnknownToolExecution): tool.run_tool({"url":"b"})
     assert len(calls) == 1
+    store.close()
+
+
+def test_read_only_unknown_call_is_retried_and_legacy_record_does_not_block_recovery(tmp_path):
+    store = RunStore(str(tmp_path))
+    calls = []
+    class ReadTool(BaseTool):
+        source_access = "public"
+        replay_policy = "safe_retry"
+        def __init__(self): super().__init__("read_arxiv_paper", "read", [])
+        def run_tool(self, parameters):
+            calls.append(parameters)
+            return "paper text"
+
+    from hashlib import sha256
+    parameters = {"paper_id": "2306.08543"}
+    key = "T1:0:" + sha256(json.dumps(["read_arxiv_paper", parameters], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    # Legacy rows have no replay_policy, as in Runs created before this fix.
+    store.call_started("run", key, {"tool": "read_arxiv_paper", "parameters": parameters,
+                                     "task": "T1:0", "source_access": "public"})
+    assert store.unknown_call_records("run", mark=True)[0]["status"] == "unknown"
+    tool = JournaledTool(ReadTool(), store, "run", "T1:0")
+    assert tool.run_tool(parameters) == "paper text"
+    assert calls == [parameters]
+    assert store.call("run", key)[0] == "completed"
+    store.close()
+
+
+def test_recovery_blocks_only_unknown_calls_that_require_manual_review(tmp_path):
+    store = RunStore(str(tmp_path))
+    request, now = contract().execution, utc_now()
+    snapshot = RunSnapshot(
+        run_id="run", workflow=request.workflow, query="q",
+        execution=request.model_copy(update={"run_id": "run"}),
+        status=RunStatus.INTERRUPTED, created_at=now, updated_at=now,
+        restart_required=True,
+        reason="外部工具执行状态未知，不能自动重放；请查看记录后明确重新开始",
+    )
+    store.append(snapshot, RunEvent(sequence=1, type="run_interrupted"))
+    store.call_started("run", "safe", {"tool": "read_arxiv_paper"})
+
+    class CompatibleCheckpoints:
+        @staticmethod
+        def compatible(_snapshot): return True
+
+    manager = RunManager(store=store, checkpoints=CompatibleCheckpoints())
+    manager.register_runners({request.workflow: object()})
+    assert manager._recovery_issue(manager._runs["run"]) is None
+
+    store.call_started("run", "unsafe", {"tool": "submit_external_job", "replay_policy": "manual"})
+    assert "unknown_execution_state" in manager._recovery_issue(manager._runs["run"])
     store.close()
 
 

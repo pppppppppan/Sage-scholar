@@ -64,6 +64,7 @@ class BudgetedTool(BaseTool):
     def __init__(self, tool, budget):
         super().__init__(tool.name, tool.description, tool.parameters)
         self.source_access = tool.source_access
+        self.replay_policy = tool.replay_policy
         self._tool, self._budget = tool, budget
 
     def to_schema(self):

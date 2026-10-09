@@ -10,6 +10,17 @@ class MCPTool(BaseTool):
     Adapt mcp tools into our own tool base class.
     """
     source_access = "public"
+    _SAFE_RETRY_CALLS = frozenset({
+        ("fetch", "fetch"),
+        ("tavily", "tavily_search"),
+        ("brave-search", "brave_web_search"),
+        ("paper-search", "search_arxiv"),
+        ("paper-search", "search_google_scholar"),
+        ("paper-search", "download_arxiv"),
+        ("paper-search", "read_arxiv_paper"),
+        ("github", "search_repositories"),
+        ("github", "search_code"),
+    })
     def __init__(
         self, 
         original_name: str, 
@@ -23,6 +34,8 @@ class MCPTool(BaseTool):
         self.original_name = original_name
         self.input_schema = input_schema
         self.mcp_client = mcp_client
+        if (mcp_client.name, original_name) in self._SAFE_RETRY_CALLS:
+            self.replay_policy = "safe_retry"
 
         prefixed_name = f"mcp__{mcp_client.name}__{original_name}"
         super().__init__(name=prefixed_name, description=description, parameters=[])

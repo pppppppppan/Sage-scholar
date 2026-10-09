@@ -152,11 +152,31 @@ class RunStore:
         with self.transaction() as db:
             db.execute("UPDATE calls SET status='completed',payload=? WHERE run_id=? AND call_key=?", (json.dumps(payload,ensure_ascii=False),run_id,key))
 
-    def unknown_calls(self, run_id, *, mark=False):
+    def call_restarted(self, run_id, key, intent):
+        """Atomically claim an ambiguous call for a declared-safe retry."""
+        with self.transaction() as db:
+            cursor = db.execute(
+                "UPDATE calls SET status='started',payload=? WHERE run_id=? AND call_key=? AND status IN ('started','unknown')",
+                (json.dumps(intent, ensure_ascii=False), run_id, key),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("Tool call is no longer available for retry")
+
+    def unknown_call_records(self, run_id, *, mark=False):
         with self.transaction() as db:
             if mark:
                 db.execute("UPDATE calls SET status='unknown' WHERE run_id=? AND status='started'", (run_id,))
-            return [r[0] for r in db.execute("SELECT call_key FROM calls WHERE run_id=? AND status IN ('started','unknown')", (run_id,))]
+            rows = db.execute(
+                "SELECT call_key,status,payload FROM calls WHERE run_id=? AND status IN ('started','unknown')",
+                (run_id,),
+            ).fetchall()
+        return [
+            {"call_key": key, "status": status, "intent": json.loads(payload) if payload else {}}
+            for key, status, payload in rows
+        ]
+
+    def unknown_calls(self, run_id, *, mark=False):
+        return [record["call_key"] for record in self.unknown_call_records(run_id, mark=mark)]
 
     def add_seconds(self, run_id, seconds):
         with self.transaction() as db:

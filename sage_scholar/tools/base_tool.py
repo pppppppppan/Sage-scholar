@@ -16,6 +16,9 @@ class BaseTool(ABC):
     # Unknown tools are denied until their source capability is declared.
     source_access = "unknown"
     evidence_kind = "observation"
+    # Durable recovery is conservative by default.  Tools must opt in only when
+    # repeating the same call cannot create a duplicate external side effect.
+    replay_policy = "manual"
     def __init__(self, name: str, description: str, parameters: list[ToolParameter]):
         self.name = name
         self.description = description

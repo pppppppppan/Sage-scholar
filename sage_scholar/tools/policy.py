@@ -16,6 +16,7 @@ class PolicyTool(BaseTool):
         super().__init__(tool.name, tool.description, tool.parameters)
         self._tool, self._policy = tool, policy
         self.source_access = tool.source_access
+        self.replay_policy = tool.replay_policy
 
     def to_schema(self):
         return self._tool.to_schema()
@@ -32,6 +33,7 @@ class EvidenceTool(BaseTool):
     def __init__(self, tool, store, record, observe=lambda item: None):
         super().__init__(tool.name, tool.description, tool.parameters)
         self.source_access = tool.source_access
+        self.replay_policy = tool.replay_policy
         self._tool, self._store, self._record, self._observe = tool, store, record, observe
 
     def to_schema(self):

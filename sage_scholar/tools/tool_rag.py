@@ -3,6 +3,7 @@ from .base_tool import BaseTool, ToolParameter
 
 class RAGTool(BaseTool):
     source_access = "local"
+    replay_policy = "safe_retry"
 
     def __init__(self, retrieval, policy, record=lambda evidence: None):
         super().__init__(

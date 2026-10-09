@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 class SearchTool(BaseTool):
     source_access = "public"
+    replay_policy = "safe_retry"
     def __init__(
         self,
         brave_tool: MCPTool | None = None,

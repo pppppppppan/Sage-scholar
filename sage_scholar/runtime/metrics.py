@@ -21,6 +21,7 @@ class MeasuredTool(BaseTool):
         super().__init__(tool.name, tool.description, tool.parameters)
         self.tool = tool
         self.source_access = tool.source_access
+        self.replay_policy = tool.replay_policy
 
     def to_schema(self):
         return self.tool.to_schema()

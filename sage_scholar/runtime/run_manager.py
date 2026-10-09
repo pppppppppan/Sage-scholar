@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 from sage_scholar.context.manager import request_context
 from sage_scholar.domain.execution import ExecutionRequest
-from .journal import WorkflowInterrupted
+from .journal import WorkflowInterrupted, is_safe_retry_intent
 from .control import RunControl, RunBudgetExceeded, run_control
 from .human import RunWaiting, HumanResponse, public_interrupts
 from .limits import ExecutionLimits, execution_budget
@@ -119,10 +119,16 @@ class RunManager:
 
     def _recovery_issue(self, state):
         run = state.snapshot
-        if run.restart_required:
+        stale_unknown_lock = run.restart_required and (
+            "unknown_execution_state" in (run.reason or "")
+            or "外部工具执行状态未知" in (run.reason or "")
+            or "未确认结果的外部调用" in (run.reason or "")
+        )
+        if run.restart_required and not stale_unknown_lock:
             return run.reason or "restart_required：需要明确重新开始。"
-        unknown = self.store.unknown_calls(run.run_id, mark=True) if self.store else []
-        if unknown:
+        unknown = self.store.unknown_call_records(run.run_id, mark=True) if self.store else []
+        unsafe = [record for record in unknown if not is_safe_retry_intent(record["intent"])]
+        if unsafe:
             return "unknown_execution_state：存在未确认结果的外部调用；不能自动重放，请核查后明确重新开始。"
         if not self.checkpoints or not self.checkpoints.compatible(run):
             return "restart_required：checkpoint 缺失或 schema 不兼容。"
