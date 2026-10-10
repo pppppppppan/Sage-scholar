@@ -4,7 +4,7 @@ import hashlib
 import json
 
 import pytest
-from research_fakes import contract
+from research_fakes import research_request
 from test_v43_memory import memory, value, extraction
 from test_memory_finalization import durable_research
 from sage_scholar.domain.documents import utc_now
@@ -147,7 +147,7 @@ def test_canonical_requires_exact_prior_context_anchors(tmp_path, context_quotes
 
 
 def test_restart_restores_recent_conversation_and_does_not_reextract_history(tmp_path, monkeypatch):
-    request = contract().execution.model_copy(update={'query': CONFIRM, 'request_id': 'req2', 'history': [
+    request = research_request().model_copy(update={'query': CONFIRM, 'request_id': 'req2', 'history': [
         {'role': 'user', 'content': 'SAGE Scholar 应该怎么设计？', 'id': 'u1'},
         {'role': 'assistant', 'content': PROPOSAL, 'id': 'a1'}]})
     # The current user is index 2 in the durable snapshot; the old user is ineligible.
@@ -215,7 +215,7 @@ def test_recall_only_available_on_service_and_keeps_semantic_path(tmp_path):
 
 def test_recent_context_is_bounded_without_truncating_original_messages():
     history = [{'role': 'user', 'content': '旧资料' * 10000}, messages()[0]]
-    request = contract().execution.model_copy(update={'query': CONFIRM, 'history': history})
+    request = research_request().model_copy(update={'query': CONFIRM, 'history': history})
     source = conversation_messages(request)
     assert [m['content'] for m in source] == [PROPOSAL, CONFIRM]
     assert [m['history_index'] for m in source] == [1, 2]

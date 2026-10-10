@@ -13,7 +13,7 @@ def recall_query(request, messages, purpose=""):
         for key in ("requested_dimensions", "dimensions", "comparison_dimensions"):
             if isinstance(value.get(key), list):
                 dimensions.extend(str(v)[:150] for v in value[key][:12])
-        for key in ("contract", "research_contract", "task", "execution"):
+        for key in ("brief", "task", "execution"):
             brief(value.get(key))
     first = next((m.get("content", "") for m in messages if m.get("role") == "user" and not m.get("_context_kind")), "")
     try:

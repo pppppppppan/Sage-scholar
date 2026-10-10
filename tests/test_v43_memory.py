@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from research_fakes import ScriptedLLM, contract
+from research_fakes import ScriptedLLM, research_request
 from sage_scholar.memory import MemoryInput, MemoryStore, MemoryService, MemoryRecall
 from sage_scholar.context.manager import ContextManager
 
@@ -48,7 +48,7 @@ def test_large_memory_store_only_injects_relevant_active_subset(tmp_path):
     foreign = store.add(value("这个课题必须微调", workspace_id="another"))
     store.add(value("这轮使用 LoRA", scope="session", session_id="other-session"))
     manager = ContextManager(tmp_path, max_tokens=9000, memories=service)
-    request = contract().execution.model_copy(update={"query": "这次比较低秩适配器", "allow_web": False})
+    request = research_request().model_copy(update={"query": "这次比较低秩适配器", "allow_web": False})
     result = manager.prepare([{"role": "user", "content": request.query}], request=request, output_reserve=1000)
     text = json.dumps(result.messages, ensure_ascii=False)
     assert wanted.memory_id in text and foreign.memory_id not in text

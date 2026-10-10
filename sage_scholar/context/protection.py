@@ -62,6 +62,12 @@ def protected_facts(messages):
     return unique(facts)
 
 
-def prompt_contract(contract):
-    """Persist the full ExecutionRequest; serialize its history only through ContextManager."""
-    return contract.model_dump(mode="json", exclude={"execution": {"history"}})
+def prompt_brief(request):
+    """A prompt view, not a second persisted contract. History belongs to ContextManager."""
+    return {
+        "objective": request.query,
+        "constraints": request.metadata.get("constraints", []),
+        "source_policy": request.source_policy.model_dump(mode="json"),
+        "budget": {key: request.budget[key] for key in ("max_steps", "max_rounds", "max_tasks")
+                   if key in request.budget},
+    }

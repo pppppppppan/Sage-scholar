@@ -8,8 +8,8 @@ from sage_scholar.domain.execution import ExecutionRequest
 from sage_scholar.research.runtime import ResearchRuntime
 from sage_scholar.routing import ExecutionMode, SourceScope, Workflow
 from test_document_evidence import library
-from research_fakes import FakeSupervisor, FakeWriter, FakeSynthesis, SupportedReview
-from sage_scholar.domain.research import Finding, GapReview, FollowUp, ResearchNote
+from research_fakes import FakeSupervisor, FakeWriter
+from sage_scholar.domain.research import SupervisorReview, SubQuestion, ResearchNote
 from test_source_policy import ExternalTool
 
 
@@ -21,23 +21,19 @@ def build_runtime(monkeypatch, tmp_path, adapter, scope, ids, approved=True):
         "researcher": {"allowed_tools": ["rag_search", "web_fetch"]},
     }))
     class Supervisor(FakeSupervisor):
-        def __init__(self, **kwargs):
-            pass
-    class Review:
-        def __init__(self, *args):
-            pass
-        def review(self, contract, tasks, notes):
-            if approved or (approved is None and notes[0].revision > 0):
-                return GapReview()
-            return GapReview(missing=["实验结果未核验"], next_tasks=[FollowUp(
-                task_id="T1", objective="补充实验结果")])
+        def __init__(self, **kwargs): pass
+        def review(self, request, tasks, notes):
+            if approved or (approved is None and len(notes) > 1):
+                return SupervisorReview()
+            return SupervisorReview(remaining_gaps=["实验结果未核验"],
+                follow_up_questions=[SubQuestion(objective="补充实验结果")])
     class Researcher:
         def __init__(self, tool_list, **kwargs):
             self.tools = {tool.name: tool for tool in tool_list}
             self.ids = kwargs["observed_ids"]
-        def run(self, task, contract, dependency_notes):
-            assert contract.source_policy.document_ids == tuple(ids)
-            assert contract.source_policy.permits_web == (scope == SourceScope.PUBLIC)
+        def run(self, task, request):
+            assert request.source_policy.document_ids == tuple(ids)
+            assert request.source_policy.permits_web == (scope == SourceScope.PUBLIC)
             if scope == SourceScope.PUBLIC:
                 assert set(self.tools) == {"web_fetch"}
                 content = self.tools["web_fetch"].run_tool({"url": "https://example.org/paper"})
@@ -45,17 +41,11 @@ def build_runtime(monkeypatch, tmp_path, adapter, scope, ids, approved=True):
                 assert set(self.tools) == {"rag_search"}
                 content = self.tools["rag_search"].run_tool({"query": "method", "document_ids": ["other"]})
                 assert "Method A" in content and "SECRET B" not in content
-            return ResearchNote(task_id=task.task_id, question=task.objective, revision=task.revision,
-                evidence_ids=self.ids(), findings=[Finding(text="source finding", evidence_ids=self.ids())])
-    class Writer(FakeWriter):
-        def outline(self, contract, synthesis):
-            return super().outline(contract, synthesis).model_copy(update={"title": "report"})
+            return ResearchNote(task_id=task.task_id, question=task.objective,
+                source_ids=self.ids(), content="source finding " + " ".join(f"[{i}]" for i in self.ids()))
     monkeypatch.setattr(module, "Supervisor", Supervisor)
     monkeypatch.setattr(module, "Researcher", Researcher)
-    monkeypatch.setattr(module, "Writer", Writer)
-    monkeypatch.setattr(module, "GapReviewer", Review)
-    monkeypatch.setattr(module, "ResearchSynthesis", FakeSynthesis)
-    monkeypatch.setattr(module, "ReportReviewer", SupportedReview)
+    monkeypatch.setattr(module, "Writer", FakeWriter)
     def forbidden_connect(*args):
         raise AssertionError("Offline Research must not connect any MCP server")
     monkeypatch.setattr(module, "create_mcp_clients", forbidden_connect)
@@ -69,7 +59,7 @@ def build_runtime(monkeypatch, tmp_path, adapter, scope, ids, approved=True):
     runtime.registry.register_tool(tool)
     request = ExecutionRequest(
         query="调研所选论文", workflow=Workflow.DEEP_RESEARCH, source_scope=scope,
-        document_ids=tuple(ids), allow_web=scope == SourceScope.PUBLIC, execution_mode=ExecutionMode.RUN,
+        budget={"max_rounds": 0}, document_ids=tuple(ids), allow_web=scope == SourceScope.PUBLIC, execution_mode=ExecutionMode.RUN,
     )
     return runtime, request
 
@@ -135,12 +125,11 @@ def test_targeted_retry_keeps_selected_documents_and_no_web(monkeypatch, tmp_pat
                                      [a.document_id], approved=None)
     request = request.model_copy(update={"budget": {"max_rounds": 1}})
     events = list(runtime.run_research(request))
-    notes = [event["research_node"]["research_notes"]["T1"] for event in events if "research_node" in event]
-    assert [note.revision for note in notes] == [0, 1]
-    assert notes[0].task_id == notes[1].task_id
+    notes = [note for event in events if "research_node" in event for note in event["research_node"]["research_notes"].values()]
+    assert [note.task_id for note in notes] == ["T1", "T2"]
     assert events[-1]["outcome_node"]["remaining_gaps"] == []
     assert all(adapter.evidence_store.get(identity).document_id == a.document_id
-               for note in notes for identity in note.evidence_ids)
+               for note in notes for identity in note.source_ids)
     public = [kind for event in events for kind, _ in runtime.to_public_events(event)]
-    assert {"research_planned", "research_task_started", "research_task_completed", "gap_reviewed",
-            "report_drafting", "report_reviewing", "report_completed", "write"} <= set(public)
+    assert {"research_planned", "research_task_started", "research_task_completed", "supervisor_reviewed",
+            "report_drafting", "report_completed", "write"} <= set(public)

@@ -5,23 +5,23 @@ from types import SimpleNamespace
 
 import pytest
 
-from research_fakes import contract, ScriptedLLM
+from research_fakes import research_request, ScriptedLLM
 from sage_scholar.application.qa_service import QAService
 from sage_scholar.base.llm_client import LLMClient
 from sage_scholar.context.conversation import HistorySummary
 from sage_scholar.context.manager import ContextBudgetExceeded, ContextManager, request_context
-from sage_scholar.context.protection import prompt_contract, user_constraints
+from sage_scholar.context.protection import prompt_brief, user_constraints
 from sage_scholar.context.tools import ContextReadTool
 from sage_scholar.domain import EvidenceRef
 from sage_scholar.domain.execution import ExecutionRequest
-from sage_scholar.domain.research import Synthesis, SynthesisBlock, ReportOutline, SectionPlan, Finding, ResearchNote
+from sage_scholar.domain.research import ResearchNote
 from sage_scholar.infrastructure.evidence_store import JsonEvidenceStore
 from sage_scholar.research.evidence_context import ResearchEvidenceContext
 from sage_scholar.routing import SourceScope
 
 
 def request(**changes):
-    return contract().execution.model_copy(update={"request_id": "r42", **changes})
+    return research_request().model_copy(update={"request_id": "r42", **changes})
 
 
 def summary(previous, batch, budget):
@@ -137,7 +137,7 @@ def test_source_window_reread_preserves_identity_and_original(tmp_path):
         section="Experiments", location={"page": 4}, original_text="original evidence " * 3000,
         metadata={"kind": "source_content"})
     store.save(item)
-    context = ResearchEvidenceContext(store, contract().source_policy, context_manager=manager)
+    context = ResearchEvidenceContext(store, research_request().source_policy, context_manager=manager)
     context.register(item)
     payload = {"evidence": [{**item.model_dump(), "truncated": False}]}
     prepared = manager.prepare([{"role": "user", "content": json.dumps(payload)}], request=request(), output_reserve=1000)
@@ -231,30 +231,27 @@ def test_same_provider_compresses_without_recursion_and_records_usage(tmp_path):
 
 
 def test_contract_history_is_excluded_only_from_prompt_not_checkpoint():
-    source = contract().model_copy(update={"execution": request(history=long_history())})
-    assert "history" not in prompt_contract(source)["execution"]
-    assert source.model_dump()["execution"]["history"] == long_history()
+    source = request(history=long_history())
+    assert "history" not in prompt_brief(source)
+    assert source.model_dump()["history"] == long_history()
 
 
 def test_writer_selects_findings_and_counterevidence_not_incidental_observations(tmp_path):
     from sage_scholar.agents.writer import Writer
     store = JsonEvidenceStore(str(tmp_path))
-    context = ResearchEvidenceContext(store, contract().source_policy)
+    context = ResearchEvidenceContext(store, research_request().source_policy)
     items = [EvidenceRef.create(source_id=f"https://example.org/{i}", original_text=f"Source {i}",
         source_version="v1", parser_version="test", metadata={"kind": "source_content"}) for i in range(3)]
     for item in items:
         store.save(item)
         context.register(item)
     a, b, incidental = [item.evidence_id for item in items]
-    note = ResearchNote(task_id="T1", question="q", evidence_ids=[a, b, incidental],
-                        findings=[Finding(text="finding", evidence_ids=[a])], conflicts=[f"反例来自 {b}"])
+    note = ResearchNote(task_id="T1", question="q", source_ids=[a, b], content=f"finding [{a}]\n反例 [{b}]")
     llm = ScriptedLLM("正文 [1][2]")
-    synthesis = Synthesis(blocks=[SynthesisBlock(heading="比较", analysis="发现与反例", evidence_ids=[a,b])])
-    plan = SectionPlan(section_id="s", heading="方法", objective="比较", block_indices=[0])
-    outline = ReportOutline(title="Report", sections=[plan])
-    Writer(llm, evidence_context=context).write_section(contract(), synthesis, outline, plan, {1:a,2:b,3:incidental})
+    Writer(llm, evidence_context=context).run(research_request(), [note])
     payload = json.loads(llm.calls[0]["messages"][-1]["content"])
-    assert {e["evidence_id"] for e in payload["sources"]} == {a, b}
+    assert {e["source"] for e in payload["sources"]} == {context.get(a).source_id, context.get(b).source_id}
+
 
 
 def test_summary_failure_is_explicit_and_entire_original_remains_reloadable(tmp_path):

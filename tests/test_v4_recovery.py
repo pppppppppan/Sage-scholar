@@ -11,7 +11,7 @@ from sage_scholar.runtime.checkpoints import Checkpoints
 from sage_scholar.runtime.journal import JournaledTool, UnknownToolExecution, DurableResearcher
 from sage_scholar.research.budget import ResearchBudget, BudgetedTool
 from sage_scholar.graph.graph_builder import build_graph
-from research_fakes import contract, FakeSupervisor, FakeResearcher, FakeWriter, CompleteReview, FakeSynthesis, SupportedReview
+from research_fakes import research_request, FakeSupervisor, FakeResearcher, FakeWriter
 from sage_scholar.tools.base_tool import BaseTool
 
 
@@ -21,16 +21,16 @@ def graph(checkpoints, calls):
             calls.append(True)
             return super().run(*args, **kwargs)
     return build_graph(FakeSupervisor(), lambda _: Researcher(), FakeWriter(),
-                       gap_reviewer=CompleteReview(), synthesizer=FakeSynthesis(), report_reviewer=SupportedReview(), checkpointer=checkpoints.saver)
+                       checkpointer=checkpoints.saver)
 
 
 def test_restart_resumes_same_native_checkpoint_notes_budget_and_sse(tmp_path):
     calls = []
     store, checkpoints = RunStore(str(tmp_path)), Checkpoints(str(tmp_path))
     run_id = "durable-run"
-    request = contract().execution.model_copy(update={"run_id": run_id})
+    request = research_request().model_copy(update={"run_id": run_id})
     g = graph(checkpoints, calls)
-    list(g.stream({"research_contract": contract()}, checkpoints.config(run_id), interrupt_after=["research_node"], durability="sync"))
+    list(g.stream({"execution": research_request()}, checkpoints.config(run_id), interrupt_after=["research_node"], durability="sync"))
     assert calls == [True]
     assert store.reserve(run_id, 5)
     now = utc_now()
@@ -44,7 +44,7 @@ def test_restart_resumes_same_native_checkpoint_notes_budget_and_sse(tmp_path):
     class Runner:
         async def run(self, request, emit, cancelled):
             result = await asyncio.to_thread(graph(checkpoints, calls).invoke, None, checkpoints.config(request.run_id))
-            assert result["research_notes"]["T1"].evidence_ids == ["ev_a"]
+            assert result["research_notes"]["T1"].source_ids == ["ev_a"]
             await emit("write", {"report": result["final_report"]})
             return RunOutcome(result={"report": result["final_report"]})
     async def scenario():
@@ -69,7 +69,7 @@ def test_restart_resumes_same_native_checkpoint_notes_budget_and_sse(tmp_path):
 @pytest.mark.parametrize("schema", [4, 999])
 def test_missing_or_incompatible_checkpoint_interrupts_instead_of_restarting(tmp_path, schema):
     store, checkpoints = RunStore(str(tmp_path)), Checkpoints(str(tmp_path))
-    request, now = contract().execution, utc_now()
+    request, now = research_request(), utc_now()
     snapshot = RunSnapshot(run_id="lost", workflow=request.workflow, query="q", execution=request,
         status=RunStatus.RUNNING, schema_version=schema, event_cursor=1, created_at=now, updated_at=now)
     store.append(snapshot, RunEvent(sequence=1,type="run_started"))
@@ -133,7 +133,7 @@ def test_read_only_unknown_call_is_retried_and_legacy_record_does_not_block_reco
 
 def test_recovery_blocks_only_unknown_calls_that_require_manual_review(tmp_path):
     store = RunStore(str(tmp_path))
-    request, now = contract().execution, utc_now()
+    request, now = research_request(), utc_now()
     snapshot = RunSnapshot(
         run_id="run", workflow=request.workflow, query="q",
         execution=request.model_copy(update={"run_id": "run"}),
@@ -160,7 +160,7 @@ def test_recovery_blocks_only_unknown_calls_that_require_manual_review(tmp_path)
 @pytest.mark.parametrize("status", [RunStatus.FAILED, RunStatus.PARTIAL])
 def test_explicit_failed_or_partial_resume_extends_run_budget(tmp_path, status):
     store = RunStore(str(tmp_path))
-    request, now = contract().execution, utc_now()
+    request, now = research_request(), utc_now()
     request = request.model_copy(update={"run_id": "run", "budget": {
         "max_total_tokens": 600_000, "max_tool_calls": 100, "max_seconds": 3600,
     }})
@@ -206,9 +206,9 @@ def test_note_commits_before_graph_checkpoint_and_reuses_on_retry(tmp_path):
             return super().run(*args)
     store = RunStore(str(tmp_path))
     task = ResearchTask(task_id="T1", objective="read")
-    note = DurableResearcher(lambda _: Researcher(), store, "run", lambda: False).run(task, contract())
+    note = DurableResearcher(lambda _: Researcher(), store, "run", lambda: False).run(task, research_request())
     store.close()
     store = RunStore(str(tmp_path))
-    restored = DurableResearcher(lambda _: Researcher(), store, "run", lambda: False).run(task, contract())
+    restored = DurableResearcher(lambda _: Researcher(), store, "run", lambda: False).run(task, research_request())
     assert restored == note and calls == [True]
     store.close()

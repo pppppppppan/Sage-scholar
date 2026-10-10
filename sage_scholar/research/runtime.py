@@ -18,13 +18,10 @@ from sage_scholar.agents import Researcher, Supervisor, Writer
 from sage_scholar.base import LLMClient
 from sage_scholar.config import Config
 from sage_scholar.domain.execution import ExecutionRequest
-from sage_scholar.domain.research import ResearchContract
+from sage_scholar.runtime.limits import execution_budget
 from sage_scholar.infrastructure.json_store import write_json
 from .budget import ResearchBudget, BudgetedTool
 from .evidence_context import ResearchEvidenceContext
-from .gap_review import GapReviewer
-from .synthesis import ResearchSynthesis
-from .report_review import ReportReviewer
 from sage_scholar.infrastructure.retrieval import LegacyRetrievalAdapter
 from sage_scholar.tools.policy import EvidenceTool
 from sage_scholar.graph import build_graph
@@ -92,13 +89,11 @@ class ResearchRuntime:
         yield {"initialization_node": {"status": "initializing", "message": "正在初始化研究工具…"}}
         if request.source_policy.permits_web and self._connect_external:
             yield from self._initialize_research_tools()
-        contract = ResearchContract.from_request(
-            request, max_rounds=self.config.max_rounds, max_steps=self.config.max_steps,
-        )
-        policy = contract.source_policy
+        request = request.model_copy(update={"budget": execution_budget(request.workflow, request.budget)})
+        policy = request.source_policy
         context = ResearchEvidenceContext(self.retrieval.evidence_store, policy, self.retrieval.documents, self.context_manager)
         durable = bool(self.store and self.checkpoints and request.run_id)
-        budget = ResearchBudget(contract.limits.max_tool_calls, self.store if durable else None, request.run_id)
+        budget = ResearchBudget(request.budget["max_tool_calls"], self.store if durable else None, request.run_id)
         observation_run = request.run_id or uuid4().hex
         if durable:
             for identity in self.store.evidence_ids(request.run_id):
@@ -106,7 +101,7 @@ class ResearchRuntime:
                 if item:
                     context.register(item)
 
-        def make_tools(task_id, observed_ids, issues):
+        def make_tools(task_id, observed_ids):
             def record(evidence):
                 context.register(evidence)
                 observed_ids.add(evidence.evidence_id)
@@ -114,8 +109,6 @@ class ResearchRuntime:
                     self.store.register_evidence(request.run_id, evidence.evidence_id)
 
             def observe(observation):
-                if observation.get("kind") == "error":
-                    issues.append(f"{observation['tool']} 返回错误，来源不可访问")
                 write_json(
                     Path(self.config.data_dir) / "observations" / observation_run / f"{uuid4().hex}.json",
                     {"task_id": task_id, **observation},
@@ -145,7 +138,7 @@ class ResearchRuntime:
                 tools.append(ContextReadTool(self.context_manager, context, observation_run))
             return tools
 
-        available = make_tools("capabilities", set(), [])
+        available = make_tools("capabilities", set())
         yield {"policy_node": {
             "source_policy": policy.model_dump(mode="json"),
             "available_tools": [tool.name for tool in available],
@@ -161,7 +154,7 @@ class ResearchRuntime:
         )
         supervisor = Supervisor(
             llm=self.llm_client,
-            max_steps=contract.limits.max_steps, review_llm=review_llm,
+            max_steps=request.budget["max_steps"], review_llm=review_llm,
         )
         writer = Writer(
             llm=self.llm_client, evidence_context=context,
@@ -169,13 +162,12 @@ class ResearchRuntime:
         )
 
         def build_researcher(task_id, revision=0):
-            observed_ids, issues = set(), []
+            observed_ids = set()
             return Researcher(
                 name=task_id, llm=self.llm_client,
-                tool_list=make_tools(f"{task_id}:{revision}", observed_ids, issues),
-                max_steps=contract.limits.max_steps, temperature=self.config.llm.research_temperature,
+                tool_list=make_tools(f"{task_id}:{revision}", observed_ids),
+                max_steps=request.budget["max_steps"], temperature=self.config.llm.research_temperature,
                 evidence_context=context, observed_ids=lambda: sorted(observed_ids),
-                observed_issues=lambda: list(issues),
             )
 
         def create_researcher(task_id):
@@ -186,19 +178,17 @@ class ResearchRuntime:
 
         graph = build_graph(
             supervisor, create_researcher, writer,
-            gap_reviewer=GapReviewer(review_llm, context),
-            synthesizer=ResearchSynthesis(self.llm_client, context),
-            report_reviewer=ReportReviewer(review_llm, context), budget=budget,
+            budget=budget, execution_request=request,
             checkpointer=self.checkpoints.saver if durable else None,
             interaction=(lambda req: assess(req, self.llm_client)) if durable else None,
         )
         final_report = None
         graph_config = self.checkpoints.config(request.run_id) if durable else {}
-        graph_config["recursion_limit"] = 250 + 3 * contract.limits.max_tasks * (contract.limits.max_rounds + 1)
+        graph_config["recursion_limit"] = 250 + 3 * request.budget["max_tasks"] * (request.budget["max_rounds"] + 1)
         snapshot = graph.get_state(graph_config) if durable else None
         if durable and snapshot:
-            snapshot = continue_graph(graph, graph_config, snapshot, request, contract.limits)
-        graph_input = None if snapshot and snapshot.values else {"research_contract": contract}
+            snapshot = continue_graph(graph, graph_config, snapshot, request)
+        graph_input = None if snapshot and snapshot.values else {"execution": request}
         graph_input = resume_command(snapshot, request.metadata.get("_resume_input", {}), graph_input)
         if snapshot and snapshot.values and not snapshot.next:
             final_report = snapshot.values.get("report_result")
@@ -259,27 +249,25 @@ class ResearchRuntime:
                 ]}))
                 events.append(("research_planned", {"tasks": [task.model_dump() for task in tasks]}))
             elif node_name == "dispatch_node":
+                if output.get("tasks"):
+                    events.append(("research_planned", {
+                        "tasks": [task.model_dump() for task in output["tasks"].values()],
+                    }))
                 for identity in output["ready_tasks"]:
                     events.append(("research_task_started", {"task_id": identity}))
-            elif node_name in {"research_node", "section_sources_node"}:
+            elif node_name == "research_node":
                 for note in output["research_notes"].values():
                     events.append(("research", {
-                        "question": note.question, "preview": "; ".join(f.text for f in note.findings)[:150],
-                        "tool_call_counts": note.tool_usage,
+                        "question": note.question, "preview": note.content[:150],
+                        "tool_call_counts": {},
                         "status": output["tasks"][note.task_id].status,
                     }))
                     events.append(("research_task_completed", {"note": note.model_dump()}))
             elif node_name == "review_node":
-                review = output["gap_review"]
-                events.append(("review", {"round": output["refine_round"], "review_summary": [],
-                                          "missing_dimensions": "; ".join(review.gaps)}))
-                events.append(("gap_reviewed", review.model_dump()))
-            elif node_name == "write_node":
-                events.append(("report_drafting", {"phase": "section_completed", "section_index": output["section_index"]}))
-            elif node_name == "report_review_node":
-                events.append(("report_reviewing", {"phase": "section_completed"}))
-            elif node_name == "revise_section_node":
-                events.append(("report_revising", {"phase": "section_completed"}))
+                review = output["supervisor_review"]
+                events.append(("review", {"round": output["review_round"], "review_summary": [],
+                    "missing_dimensions": "; ".join(review.remaining_gaps)}))
+                events.append(("supervisor_reviewed", review.model_dump()))
             elif node_name == "finalize_node":
                 result = output["report_result"].model_dump(mode="json")
                 events.append(("write", result))

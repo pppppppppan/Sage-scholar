@@ -1,6 +1,6 @@
 import json
 import pytest
-from research_fakes import ScriptedLLM, contract
+from research_fakes import ScriptedLLM, research_request
 from sage_scholar.domain import EvidenceRef
 from sage_scholar.infrastructure.evidence_store import JsonEvidenceStore
 from sage_scholar.research.evidence_context import ResearchEvidenceContext
@@ -14,7 +14,7 @@ def test_memory_explicit_crud_and_context_protection(tmp_path):
     saved = memories.add(MemoryInput(content="不考虑微调；FNO 更好"))
     memories.update(saved.memory_id, MemoryInput(content="不考虑微调"))
     manager = ContextManager(str(tmp_path), max_tokens=6000, memories=MemoryService(memories, MemoryRecall(tmp_path), lambda: ScriptedLLM()))
-    request = contract().execution.model_copy(update={"query": "这次也比较微调方案", "allow_web": False,
+    request = research_request().model_copy(update={"query": "这次也比较微调方案", "allow_web": False,
         "history": [{"role": "user", "content": "不要使用私有数据"}], "request_id": "r1"})
     original = "source " * 10000
     prepared = manager.prepare([
@@ -37,7 +37,7 @@ def test_memory_explicit_crud_and_context_protection(tmp_path):
 
 def test_long_history_preserves_constraints_and_evidence_reread(tmp_path):
     manager = ContextManager(str(tmp_path), max_tokens=4000)
-    request = contract().execution.model_copy(update={"query": "继续研究", "allow_web": False,
+    request = research_request().model_copy(update={"query": "继续研究", "allow_web": False,
         "history": [{"role": "user", "content": "不要使用微调"}]})
     prepared = manager.prepare([
         {"role": "user", "content": "不要使用微调"},
@@ -49,7 +49,7 @@ def test_long_history_preserves_constraints_and_evidence_reread(tmp_path):
     item = EvidenceRef.create(source_id="https://example.org/source", source_version="v1", parser_version="test",
         original_text="original " * 2000, metadata={"kind": "source_content"})
     store = JsonEvidenceStore(str(tmp_path)); store.save(item)
-    context = ResearchEvidenceContext(store, contract().source_policy)
+    context = ResearchEvidenceContext(store, research_request().source_policy)
     context.register(item)
     assert manager.reread_evidence(context, item.evidence_id, offset=10)["original_text"] == item.original_text[10:6010]
     records = manager.read_evidence(context, [item.evidence_id, item.evidence_id], budget_tokens=100)

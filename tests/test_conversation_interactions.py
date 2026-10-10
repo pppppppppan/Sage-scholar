@@ -17,7 +17,7 @@ from sage_scholar.runtime.control import check_control, cooperative_thread, CURR
 from sage_scholar.routing import Workflow, QueryRouter
 from sage_scholar.graph.graph_builder import build_graph
 from sage_scholar.research.continuation import continue_graph
-from research_fakes import contract, FakeSupervisor, FakeResearcher, FakeWriter, CompleteReview, FakeSynthesis, SupportedReview
+from research_fakes import research_request, FakeSupervisor, FakeResearcher, FakeWriter
 
 class Direct:
     def __init__(self): self.calls = []
@@ -115,7 +115,7 @@ def test_stop_cancels_backend_only_one_run_and_retains_output(tmp_path, workflow
                 entered.set()
                 await release.wait()
                 return RunOutcome(result={'answer':'should not complete'})
-        request = contract().execution.model_copy(update={'workflow':workflow})
+        request = research_request().model_copy(update={'workflow':workflow})
         stopped = await manager.start(request, Slow())
         await entered.wait()
         other = await manager.start(request, Runner())
@@ -137,13 +137,13 @@ def test_pending_cancel_delete_and_sse_disconnect(tmp_path):
         called = []
         class Never:
             async def run(self,*args): called.append(True); await asyncio.sleep(10)
-        req = contract().execution.model_copy(update={'conversation_id':identity})
+        req = research_request().model_copy(update={'conversation_id':identity})
         run = await container.run_manager.start(req, Never())
         await container.run_manager.cancel(run.run_id)  # before _execute gets its first timeslice
         assert container.run_manager.get(run.run_id).status == RunStatus.CANCELLED
         await container.conversations.delete(identity)
         assert called == []
-        run = await container.run_manager.start(contract().execution, Runner())
+        run = await container.run_manager.start(research_request(), Runner())
         stream = container.run_manager.events(run.run_id)
         await anext(stream)
         await stream.aclose()  # closing SSE is not Stop
@@ -158,15 +158,14 @@ class HumanRunner:
     def graph(self):
         outer = self
         class Researcher(FakeResearcher):
-            def run(self, *args): outer.calls.append(args[1].objective); return super().run(*args)
-        return build_graph(FakeSupervisor(), lambda _: Researcher(), FakeWriter(), gap_reviewer=CompleteReview(),
-            synthesizer=FakeSynthesis(), report_reviewer=SupportedReview(), checkpointer=self.checkpoints.saver,
+            def run(self, *args): outer.calls.append(args[1].query); return super().run(*args)
+        return build_graph(FakeSupervisor(), lambda _: Researcher(), FakeWriter(), checkpointer=self.checkpoints.saver,
             interaction=lambda _: {'question':'比较精度还是算力？','options':['精度','算力'],'allow_skip':False})
     async def run(self, request, emit, cancelled):
         g = self.graph(); config = self.checkpoints.config(request.run_id)
         state = await asyncio.to_thread(g.get_state, config)
         value = resume_command(state, request.metadata.get('_resume_input', {}),
-            None if state.values else {'research_contract':contract().model_copy(update={'execution':request})})
+            None if state.values else {'execution':request})
         output = await asyncio.to_thread(g.invoke, value, config)
         if output.get('__interrupt__'):
             raise RunWaiting(public_interrupts(output['__interrupt__']))
@@ -181,7 +180,7 @@ def test_native_hitl_restart_binding_duplicate_skip_and_resume(tmp_path):
         manager = RunManager(store=store, checkpoints=cp)
         runner = HumanRunner(cp,calls)
         manager.register_runners({Workflow.DEEP_RESEARCH:runner})
-        run = await manager.start(contract().execution.model_copy(update={'conversation_id':identity}), runner)
+        run = await manager.start(research_request().model_copy(update={'conversation_id':identity}), runner)
         events = [e async for e in manager.events(run.run_id)]
         saved = manager.get(run.run_id)
         assert saved.status == RunStatus.WAITING_FOR_USER and events[-1].type == 'waiting_for_user'
@@ -211,27 +210,27 @@ def test_native_hitl_restart_binding_duplicate_skip_and_resume(tmp_path):
 
 
 def test_partial_native_continuation_reuses_completed_notes(tmp_path):
-    from sage_scholar.domain.research import GapReview, FollowUp, ResearchLimits
+    from sage_scholar.domain.research import SupervisorReview, SubQuestion
     calls=[]
     class Researcher(FakeResearcher):
         def run(self, task, *args): calls.append(task.task_id); return super().run(task,*args)
-    class Review:
-        def review(self, contract, tasks, notes):
-            return GapReview(missing=['compute'], next_tasks=[FollowUp(objective='compute')]) if len(notes)==1 else GapReview()
+    class Supervisor(FakeSupervisor):
+        def review(self, request, tasks, notes):
+            return SupervisorReview(remaining_gaps=['compute'], follow_up_questions=[SubQuestion(objective='compute')]) if len(notes)==1 else SupervisorReview()
     cp=Checkpoints(tmp_path)
-    graph=build_graph(FakeSupervisor(),lambda _:Researcher(),FakeWriter(),gap_reviewer=Review(),synthesizer=FakeSynthesis(), report_reviewer=SupportedReview(),checkpointer=cp.saver)
-    request=contract().execution.model_copy(update={'run_id':'partial'})
+    graph=build_graph(Supervisor(),lambda _:Researcher(),FakeWriter(),checkpointer=cp.saver)
+    request=research_request().model_copy(update={'run_id':'partial'})
     config=cp.config('partial')
-    graph.invoke({'research_contract':contract()},config)
+    graph.invoke({'execution':research_request()},config)
     before=graph.get_state(config)
-    note=before.values['research_notes']['T1'].note_id
+    note=before.values['research_notes']['T1'].content
     assert before.values['report_result'].remaining_gaps and calls==['T1']
     request=request.model_copy(update={'metadata':{'continuation':1}})
-    state=continue_graph(graph,config,before,request,ResearchLimits(max_rounds=1))
+    state=continue_graph(graph,config,before,request)
     assert state.next
     graph.invoke(None,config)
     final=graph.get_state(config)
-    assert final.values['research_notes']['T1'].note_id==note and calls[0]=='T1' and calls.count('T1')==1
+    assert final.values['research_notes']['T1'].content==note and calls[0]=='T1' and calls.count('T1')==1
     assert len(calls)==2 and not final.values['report_result'].remaining_gaps
     cp.close()
 
@@ -253,7 +252,7 @@ def test_cancel_waits_for_owned_thread_and_stops_next_dispatch(tmp_path):
             async def run(self,request,emit,cancelled):
                 await cooperative_thread(work)
                 calls.append('next tool')
-        run=await manager.start(contract().execution,Slow())
+        run=await manager.start(research_request(),Slow())
         await asyncio.to_thread(entered.wait,1)
         await manager.cancel(run.run_id)
         await asyncio.gather(*list(manager._tasks.values()),return_exceptions=True)
@@ -272,7 +271,7 @@ def test_cumulative_budget_persisted_and_not_context_limit(tmp_path):
                 control=CURRENT_CONTROL.get()
                 store.record_usage(request.run_id,4090,0)
                 control.reserve_model(100)
-        run=await manager.start(contract().execution.model_copy(update={'budget':{'max_total_tokens':4096}}),Limited())
+        run=await manager.start(research_request().model_copy(update={'budget':{'max_total_tokens':4096}}),Limited())
         await manager._tasks[run.run_id]
         saved=manager.get(run.run_id)
         assert saved.status==RunStatus.PARTIAL and saved.result['answer']=='progress'

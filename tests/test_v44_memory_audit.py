@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from research_fakes import contract
+from research_fakes import research_request
 from test_v43_memory import memory, value, extraction, Embedding
 from test_query_service import make_service
 from sage_scholar.application.query_service import QueryCommand
@@ -45,7 +45,7 @@ def test_task_aware_recall_cache_and_revision_invalidation(tmp_path):
     a = store.add(value("微调方向只做 LoRA"))
     b = store.add(value("工作区架构使用数据库"))
     manager = ContextManager(tmp_path, memories=service, max_tokens=12000)
-    request = contract().execution.model_copy(update={"query": "比较主要技术路线"})
+    request = research_request().model_copy(update={"query": "比较主要技术路线"})
     Embedding.calls = []
     def prepare(objective):
         messages = [{"role": "user", "content": json.dumps({"objective": objective,
@@ -116,10 +116,10 @@ def test_research_automatic_memory_has_real_evidence_ids(tmp_path, status):
         manager = RunManager(store=db, on_completed=background.completed)
         class Runner:
             async def run(self, request, emit, cancelled):
-                await emit("research_task_completed", {"note": {"task_id": "T1", "findings": [
-                    {"text": text, "evidence_ids": [evidence.evidence_id, "ev_missing"]}]}})
+                await emit("research_task_completed", {"note": {"task_id": "T1", "question": "比较方法",
+                    "content": text, "source_ids": [evidence.evidence_id, "ev_missing"], "status": "partial"}})
                 return RunOutcome(status=status, result={"report": "report"})
-        run = await manager.start(contract().execution, Runner())
+        run = await manager.start(research_request(), Runner())
         _ = [event async for event in manager.events(run.run_id)]
         await asyncio.wait_for(background.drain(), timeout=3)
         saved = memories.list()[0]

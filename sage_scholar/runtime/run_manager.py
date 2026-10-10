@@ -155,7 +155,7 @@ class RunManager:
             raise ValueError(issue)
         # An explicit retry of a failed stage needs fresh headroom as well.  A
         # failed provider/validation attempt has already consumed its tokens;
-        # retaining the old ceiling makes the retry fail later at synthesis.
+        # retaining the old ceiling makes the retry fail later at writing.
         if state.snapshot.status in {RunStatus.FAILED, RunStatus.PARTIAL, RunStatus.CANCELLED}:
             old = execution_budget(state.snapshot.workflow, state.snapshot.execution.budget)
             ceiling = ExecutionLimits.model_fields
@@ -349,9 +349,12 @@ class RunManager:
             note = data.get("note", {})
             for task in state.snapshot.progress.get("tasks", []):
                 if task["task_id"] == note.get("task_id"):
-                    task["status"] = "failed" if note.get("metadata", {}).get("task_error") else "completed"
-        elif event_type in {"research_synthesizing", "report_drafting", "report_reviewing", "report_revising"}:
-            state.snapshot.progress["message"] = {"research_synthesizing": "正在综合研究发现…", "report_drafting": "正在分章节撰写报告…", "report_reviewing": "正在审查报告内容…", "report_revising": "正在局部修订报告…"}[event_type]
+                    task["status"] = note.get("status", "completed")
+        elif event_type in {"research_reviewing", "report_drafting"}:
+            state.snapshot.progress["message"] = {
+                "research_reviewing": "研究主管正在审查研究笔记…",
+                "report_drafting": "正在撰写完整研究报告…",
+            }[event_type]
         if event_type == "answer_delta":
             state.snapshot.result = {**(state.snapshot.result or {}), "answer": (state.snapshot.result or {}).get("answer", "") + data.get("text", "")}
         elif event_type in {"answer", "write"}:

@@ -14,7 +14,7 @@ class RunBudgetExceeded(WorkflowInterrupted):
 
 
 class ResearchBudgetReached(Exception):
-    """Stop gathering sources while retaining the report/verification allocation."""
+    """Stop gathering sources while retaining the report allocation."""
 
 
 class RunControl:
@@ -68,7 +68,7 @@ class RunControl:
         lease = self.store.reserve_model(self.request.run_id, tokens, limit)
         if lease is None and gathering:
             self.research_stopped.set()
-            raise ResearchBudgetReached('已达到资料收集 token 预算，保留剩余额度用于笔记、报告与核验')
+            raise ResearchBudgetReached('已达到资料收集 token 预算，保留剩余额度用于笔记和报告')
         if lease is None:
             self.budget_error = 'Run 累计模型 token 预算已耗尽（不是单次 Context Window 上限）'
             raise RunBudgetExceeded(self.budget_error)

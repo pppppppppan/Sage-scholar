@@ -1,20 +1,17 @@
-"""Deterministic model/tool boundaries; tests still execute the real LangGraph."""
+"""Deterministic model boundaries; the workflow tests still execute real LangGraph."""
 import json
 from types import SimpleNamespace
-
 from sage_scholar.domain.execution import ExecutionRequest
-from sage_scholar.domain.research import (
-    Finding, GapReview, ResearchContract, ResearchNote, ResearchTask,
-    Synthesis, SynthesisBlock, ReportOutline, SectionPlan, WrittenSection, ReportReview,
-)
+from sage_scholar.domain.research import ResearchNote, SubQuestion, SupervisorReview
 from sage_scholar.routing import ExecutionMode, SourceScope, Workflow
+from sage_scholar.runtime.limits import execution_budget
+from sage_scholar.research.references import finalize_report, reference_catalog
 
 
-def contract(**limits):
-    request = ExecutionRequest(query="research topic", workflow=Workflow.DEEP_RESEARCH,
+def research_request(**limits):
+    return ExecutionRequest(query="research topic", workflow=Workflow.DEEP_RESEARCH,
         source_scope=SourceScope.PUBLIC, allow_web=True, execution_mode=ExecutionMode.RUN,
-        budget={"max_rounds": 0, **limits})
-    return ResearchContract.from_request(request)
+        budget=execution_budget(Workflow.DEEP_RESEARCH, {"max_rounds": 0, **limits}))
 
 
 class ScriptedLLM:
@@ -37,14 +34,17 @@ class ScriptedLLM:
 
 
 class FakeSupervisor:
-    def plan_tasks(self, contract):
-        return [ResearchTask(task_id="T1", label="方法", objective="有哪些主要方法？")]
+    def plan(self, request):
+        return [SubQuestion(label="方法", objective="有哪些主要方法？")]
+
+    def review(self, request, tasks, notes):
+        return SupervisorReview()
 
 
 class FakeResearcher:
-    def run(self, task, contract, dependency_notes=()):
-        return ResearchNote(task_id=task.task_id, question=task.objective, revision=task.revision,
-            findings=[Finding(text="有证据支持的研究笔记。", evidence_ids=["ev_a"])], evidence_ids=["ev_a"])
+    def run(self, task, request):
+        return ResearchNote(task_id=task.task_id, question=task.objective,
+            content="有证据支持的研究笔记。[ev_a]", source_ids=["ev_a"])
 
 
 class FakeContext:
@@ -52,36 +52,15 @@ class FakeContext:
         if identity != "ev_a":
             raise ValueError(identity)
         return SimpleNamespace(source_id="https://example.org/paper", document_id=None,
-            source_version="v1", original_text="有证据支持的研究笔记。", metadata={"title": "研究论文"}, section="方法", page=None)
+            source_version="v1", original_text="有证据支持的研究笔记。", metadata={"title": "研究论文"},
+            section="方法", page=None)
 
 
 class FakeWriter:
     def __init__(self, *args, evidence_context=None, **kwargs):
         self.context = evidence_context or FakeContext()
 
-    def outline(self, contract, synthesis):
-        return ReportOutline(title="最终报告", sections=[SectionPlan(section_id="S1", heading="方法与适用条件",
-            objective="解释机制与局限", block_indices=[0])])
-
-    def write_section(self, contract, synthesis, outline, plan, references, previous=None, **kwargs):
-        return WrittenSection(section_id=plan.section_id, heading=plan.heading,
-            markdown=f"有证据支持的研究笔记。[{next(iter(references))}]",
-            revision=previous.revision + 1 if previous else 0)
-
-
-class FakeSynthesis:
-    def __init__(self, *args): pass
-    def run(self, contract, materials, allowed_ids):
-        return Synthesis(blocks=[SynthesisBlock(heading="方法", analysis="比较方法的机制及适用范围。",
-            evidence_ids=allowed_ids)])
-
-
-class CompleteReview:
-    def review(self, contract, tasks, notes):
-        return GapReview()
-
-
-class SupportedReview:
-    def __init__(self, *args): pass
-    def review(self, *args):
-        return ReportReview(acceptable=True)
+    def run(self, request, notes, gaps=()):
+        ids = list(dict.fromkeys(i for note in notes for i in note.source_ids))
+        return finalize_report("# report\n\n有证据支持的研究笔记。[1]",
+                               reference_catalog(self.context, ids), self.context, gaps)

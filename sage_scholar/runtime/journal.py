@@ -102,14 +102,14 @@ class DurableResearcher:
     def __init__(self, factory, store, run_id, cancelled):
         self.factory, self.store, self.run_id, self.cancelled = factory, store, run_id, cancelled
 
-    def run(self, task, contract, dependency_notes=()):
+    def run(self, task, request):
         from sage_scholar.domain.research import ResearchNote
-        key = f"note:{task.task_id}:{task.revision}"
+        key = f"note:markdown:{task.task_id}:{task.revision}"
         cached = self.store.result(self.run_id, key)
         if cached is not None:
             return ResearchNote.model_validate(cached)
         if self.cancelled():
             raise WorkflowInterrupted("任务已中断")
-        note = self.factory(task).run(task, contract, dependency_notes)
+        note = self.factory(task).run(task, request)
         self.store.save_result(self.run_id, key, note.model_dump(mode="json"))
         return note

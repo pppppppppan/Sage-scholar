@@ -13,7 +13,7 @@ interface SubQuestionInfo {
 }
 
 interface CompletedEntry {
-  status?: "completed" | "failed";
+  status?: "completed" | "partial" | "failed";
   preview: string;
   tool_call_counts: Record<string, number>;
 }
@@ -220,11 +220,8 @@ export default function ResearchProgress({
           break;
         }
 
-        case "report_drafting":
-        case "research_synthesizing":
-        case "report_reviewing":
-        case "report_revising": {
-          const phase = ({ research_synthesizing: "正在综合研究发现", report_revising: "正在局部修订报告", report_reviewing: "正在审查报告内容", report_drafting: "正在分章节撰写报告" })[event.type] + (event.section ? `：${event.section}` : "");
+        case "report_drafting": {
+          const phase = "正在撰写完整研究报告";
           setNodes((prev) => {
             const next = [...prev];
             const index = next.findIndex((n) => n.kind === "write");
@@ -683,6 +680,7 @@ function NodeContent({
             const entry = node.completed.get(sq.question);
             const isDone = entry !== undefined;
             const isFailed = entry?.status === "failed";
+            const isPartial = entry?.status === "partial";
             const toolUsage = entry ? formatToolUsage(entry.tool_call_counts) : null;
             const subKey = `${index}-${i}`;
             // current round: expanded unless explicitly collapsed
@@ -711,7 +709,7 @@ function NodeContent({
                   </svg>
                   <StatusLabel
                     dot={isFailed ? "bg-error" : isDone ? "bg-approved" : "bg-accent animate-pulse-dot"}
-                    text={isFailed ? "未完成" : isDone ? "已完成" : "研究中"}
+                    text={isFailed ? "未完成" : isPartial ? "已整理，存在缺口" : isDone ? "已完成" : "研究中"}
                     color={isFailed ? "text-error" : isDone ? "text-approved" : "text-accent"}
                   />
                   <span className="text-[14px] font-medium">{sq.label}</span>

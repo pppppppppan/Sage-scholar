@@ -8,7 +8,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from sage_scholar.domain import research, execution
 from sage_scholar.routing import models
 
-SCHEMAS = {"deep_research": "research-markdown-v1"}
+SCHEMAS = {"deep_research": "research-supervisor-markdown-v2"}
 
 
 class Checkpoints:

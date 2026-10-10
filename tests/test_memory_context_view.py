@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from research_fakes import contract, ScriptedLLM
+from research_fakes import research_request, ScriptedLLM
 from sage_scholar.context.manager import ContextManager
 from sage_scholar.context.memory_view import MemoryContextView
 from sage_scholar.memory import MemoryInput, MemoryStore, MemoryService, MemoryRecall
@@ -26,7 +26,7 @@ def saved_memory(tmp_path):
 
 
 def prepare(manager):
-    request = contract().execution.model_copy(update={
+    request = research_request().model_copy(update={
         'workspace_id': 'workspace-b', 'query': '请简洁回答这个问题', 'allow_web': False})
     return manager.prepare([{'role': 'user', 'content': request.query}],
                            request=request, output_reserve=500)

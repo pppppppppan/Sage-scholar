@@ -1,32 +1,29 @@
-"""Re-open an ended graph at a durable workflow boundary, preserving completed work."""
-from sage_scholar.domain.research import FollowUp, GapReview
+"""Resume the same graph with current budgets and preserved completed Markdown notes."""
 
 
-def continue_graph(graph, config, snapshot, request, limits):
-    generation = int(request.metadata.get("continuation", 0))
-    if not snapshot.values or snapshot.next or generation <= snapshot.values.get("continuation_generation", 0):
+def continue_graph(graph, config, snapshot, request):
+    if not snapshot.values:
         return snapshot
     state = snapshot.values
-    old = state["research_contract"]
+    # Preserve the original scope and HITL decision; only lifecycle metadata/budgets are refreshed.
+    old = state["execution"]
+    execution = old.model_copy(update={"budget": request.budget,
+        "metadata": {**request.metadata, "constraints": old.metadata.get("constraints", [])}})
+    generation = int(request.metadata.get("continuation", 0))
+    if snapshot.next:
+        # Leave pending writes/Send tasks intact. Node entry refreshes budgets from the current Run.
+        return snapshot
+    if generation <= state.get("continuation_generation", 0):
+        return snapshot
     tasks = {key: task.model_copy(update={"status": "pending", "revision": task.revision + 1})
              for key, task in state.get("tasks", {}).items() if task.status in {"failed", "blocked"}}
-    review = state.get("gap_review") or GapReview()
-    contract = old.model_copy(update={"execution": request, "limits": limits})
-    if not tasks and not review.gaps and state.get("outline"):
-        sections, reviews = state.get("sections", {}), state.get("section_reviews", {})
-        unfinished = [index for index, plan in enumerate(state["outline"].sections)
-                      if plan.section_id not in sections or not reviews.get(plan.section_id)
-                      or not reviews[plan.section_id].acceptable]
-        if unfinished:
-            graph.update_state(config, {"research_contract": contract, "resume_report": True,
-                "section_index": unfinished[0], "review_index": unfinished[0], "section_failures": [],
-                "continuation_generation": generation}, as_node="continuation_node")
-            return graph.get_state(config)
-    if not review.next_tasks and state.get("report_result"):
-        gaps = state["report_result"].remaining_gaps
-        review = review.model_copy(update={"next_tasks": [FollowUp(objective="针对未覆盖项补充证据：" + gap) for gap in gaps[:6]]})
-    graph.update_state(config, {"research_contract": contract, "tasks": tasks,
-        "gap_review": review, "refine_round": 0, "resume_report": False,
-        "task_gaps": [], "reviewed_evidence_ids": [], "reviewed_dimensions": [], "planning_exhausted": False, "blocked_by_budget": False,
+    review = state.get("supervisor_review")
+    # Reconsider unresolved questions with all prior notes; never reopen completed researchers.
+    if review and not review.follow_up_questions and review.remaining_gaps:
+        from sage_scholar.domain.research import SubQuestion
+        review = review.model_copy(update={"follow_up_questions": [
+            SubQuestion(objective=gap, label="定向补充") for gap in review.remaining_gaps[:3]]})
+    graph.update_state(config, {"execution": execution, "tasks": tasks, "supervisor_review": review,
+        "round_base": state.get("review_round", 0), "planning_exhausted": False, "blocked_by_budget": False,
         "continuation_generation": generation}, as_node="continuation_node")
     return graph.get_state(config)

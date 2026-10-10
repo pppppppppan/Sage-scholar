@@ -8,14 +8,14 @@ from openai.types.chat import ChatCompletionMessage
 from sage_scholar.agents.researcher import Researcher
 from sage_scholar.domain.evidence import EvidenceRef
 from sage_scholar.domain.execution import SourcePolicy
-from sage_scholar.domain.research import Finding, ResearchNote, ResearchTask
+from sage_scholar.domain.research import ResearchNote, ResearchTask
 from sage_scholar.infrastructure.evidence_store import JsonEvidenceStore
 from sage_scholar.research.evidence_context import ResearchEvidenceContext
 from sage_scholar.research.notes import validate_note
 from sage_scholar.routing import SourceScope
 from sage_scholar.tools import BaseTool
 from sage_scholar.tools.policy import EvidenceTool
-from research_fakes import ScriptedLLM, contract
+from research_fakes import ScriptedLLM, research_request
 from test_document_evidence import library
 
 
@@ -79,46 +79,38 @@ def test_source_text_is_preserved_with_stable_version_and_chunk_locations(tmp_pa
 
 def test_note_validation_cleans_fabricated_and_other_task_ids(evidence_context):
     a, b = evidence_context.ids()
-    note = ResearchNote(task_id="T1", question="compare", evidence_ids=[a, b, "ev_fake"],
-        findings=[Finding(text="fact", evidence_ids=[a, "ev_fake"])],
-        unknowns=["preprocessing unclear"], conflicts=["dataset size differs"])
+    note = ResearchNote(task_id="T1", question="compare", content=f"Fact [{a}]. Unknown [{b}] [ev_fake].\n局限：split mismatch")
     cleaned = validate_note(note, evidence_context, [a])
-    assert cleaned.evidence_ids == cleaned.findings[0].evidence_ids == [a]
-    assert cleaned.metadata["validation_issues"]
-    assert cleaned.unknowns == note.unknowns and cleaned.conflicts == note.conflicts
-    assert note.evidence_ids == [a, b, "ev_fake"]
+    assert cleaned.source_ids == [a] and cleaned.status == "partial"
+    assert b not in cleaned.content and "ev_fake" not in cleaned.content
+    assert "split mismatch" in cleaned.content and b in note.content
 
 
-def test_actual_react_loop_submits_typed_note(tmp_path):
+def test_actual_react_returns_markdown_without_json_conversion(tmp_path):
     store = JsonEvidenceStore(str(tmp_path))
-    context = ResearchEvidenceContext(store, contract().source_policy)
+    context = ResearchEvidenceContext(store, research_request().source_policy)
     tool = EvidenceTool(SourceReader(), store, context.register)
-    class Model(ScriptedLLM):
+    class Model:
+        calls = []
         def invoke(self, **kwargs):
-            if kwargs["tag"].endswith(":react") and not context.ids():
+            self.calls.append(kwargs["tag"])
+            if not context.ids():
                 return ChatCompletionMessage(role="assistant", content=None, tool_calls=[{
                     "id": "call_1", "type": "function", "function": {"name": "fetch",
                         "arguments": '{"url":"https://example.org/paper"}'}}])
-            return super().invoke(**kwargs)
-    def submit(kwargs):
-        assert "allowed_evidence_ids" in kwargs["messages"][1]["content"]
-        return {"findings": [{"text": "A scores 90", "evidence_ids": context.ids()}],
-                "evidence_ids": context.ids() + ["ev_fabricated"],
-                "unknowns": ["hardware unspecified"], "conflicts": ["other experiment differs"]}
-    researcher = Researcher("T1", Model("summary with source IDs", submit), [tool],
-                            evidence_context=context, observed_ids=context.ids)
-    note = researcher.run(ResearchTask(task_id="T1", objective="compare", revision=2), contract())
-    assert isinstance(note, ResearchNote)
-    assert note.evidence_ids == context.ids()
-    assert note.task_id == "T1" and note.revision == 2 and note.tool_usage == {"fetch": 1}
-    assert note.unknowns == ["hardware unspecified"] and note.conflicts == ["other experiment differs"]
-    assert note.metadata["validation_issues"]
-    assert "exact original" not in note.model_dump_json()
+            return ChatCompletionMessage(role="assistant", content=f"## 核心发现\nA scores 90 [{context.ids()[0]}].\n## 不确定项\nhardware unspecified")
+    model = Model()
+    note = Researcher("T1", model, [tool], evidence_context=context, observed_ids=context.ids).run(
+        ResearchTask(task_id="T1", objective="compare"), research_request())
+    assert note.source_ids == context.ids() and note.task_id == "T1"
+    assert model.calls == ["T1:react", "T1:react"]
+    assert "hardware unspecified" in note.content
+    assert set(note.model_dump()) == {"task_id", "question", "content", "source_ids", "status"}
 
 
 def test_reread_rejects_missing_or_other_run_evidence(evidence_context):
     identity = evidence_context.ids()[0]
-    context = ResearchEvidenceContext(evidence_context.store, contract().source_policy)
+    context = ResearchEvidenceContext(evidence_context.store, research_request().source_policy)
     with pytest.raises(ValueError, match="不属于"):
         context.get(identity)
     item = evidence_context.get(identity)

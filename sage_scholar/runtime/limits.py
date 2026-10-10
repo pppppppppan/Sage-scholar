@@ -11,7 +11,6 @@ class ExecutionLimits(BaseModel):
     max_steps: int = Field(default=12, ge=1, le=30)
     max_rounds: int = Field(default=4, ge=0, le=20)
     max_tasks: int = Field(default=24, ge=1, le=100)
-    max_writer_revisions: int = Field(default=1, ge=0, le=3)
 
 
 def execution_budget(workflow, requested=None):
@@ -24,11 +23,10 @@ def execution_budget(workflow, requested=None):
                     'max_tool_calls': 100,
                     # Four ReAct turns plus final note generation is enough for
                     # one focused subtask; six turns multiplied across a plan
-                    # routinely consumed the report reserve before synthesis.
+                    # routinely consumed the report reserve before writing.
                     'max_steps': 4,
                     'max_rounds': 1,
                     'max_tasks': 8,
-                    'max_writer_revisions': 1,
                 }}
     values = defaults.get(kind, {}).copy()
     for field in ExecutionLimits.model_fields:

@@ -1,28 +1,26 @@
+"""Validate source identity without rewriting a Markdown note through another LLM."""
+import re
 from sage_scholar.domain.research import ResearchNote
-from .note_view import sanitize_note
+
+SOURCE_ID = re.compile(r"\bev_[a-zA-Z0-9_-]+\b")
 
 
 def validate_note(note: ResearchNote, context, allowed_ids) -> ResearchNote:
-    note = note.model_copy(deep=True)
-    allowed = set(allowed_ids)
-    issues = list(note.metadata.get("validation_issues", []))
-    candidates = list(dict.fromkeys([*note.evidence_ids, *[
-        identity for finding in note.findings for identity in finding.evidence_ids
-    ]]))
     valid = []
-    for identity in candidates:
+    referenced = list(dict.fromkeys(SOURCE_ID.findall(note.content)))
+    allowed = set(allowed_ids)
+    for identity in referenced:
+        if identity not in allowed:
+            continue
         try:
-            if identity not in allowed:
-                raise ValueError(f"Evidence 未由此任务或其依赖读取: {identity}")
             context.get(identity)
             valid.append(identity)
-        except ValueError as exc:
-            issues.append(str(exc))
-    note.evidence_ids = valid
-    for finding in note.findings:
-        finding.evidence_ids = [identity for identity in finding.evidence_ids if identity in valid]
-        if not finding.evidence_ids:
-            note.unknowns.append(f"缺少来源支持：{finding.text}")
-    note.unknowns = list(dict.fromkeys(note.unknowns))
-    note.metadata["validation_issues"] = list(dict.fromkeys(issues))
-    return sanitize_note(note)
+        except ValueError:
+            continue
+    invalid = set(referenced) - set(valid)
+    content = SOURCE_ID.sub(lambda m: "来源未确认" if m.group() in invalid else m.group(), note.content)
+    status = note.status
+    if invalid or not valid:
+        content += "\n\n> 来源说明：部分发现尚无可回读原文支持，不能作为已核实结论。"
+        status = "partial" if status == "completed" else status
+    return note.model_copy(update={"content": content, "source_ids": valid, "status": status})

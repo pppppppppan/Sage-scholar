@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from test_v43_memory import memory, value, extraction
-from research_fakes import contract, ScriptedLLM
+from research_fakes import research_request, ScriptedLLM
 from sage_scholar.domain import EvidenceRef
 from sage_scholar.domain.documents import utc_now
 from sage_scholar.infrastructure.evidence_store import JsonEvidenceStore
@@ -127,22 +127,21 @@ def durable_research(tmp_path):
     retrieval = SimpleNamespace(evidence_store=evidence_store,documents=None)
     db = RunStore(tmp_path)
     now = utc_now()
-    request = contract().execution.model_copy(update={'run_id':'research-1'})
+    request = research_request().model_copy(update={'run_id':'research-1'})
     run = RunSnapshot(run_id='research-1',workflow=request.workflow,execution=request,query=request.query,
         status='partial',created_at=now,updated_at=now,result={'report':'最终报告没有包含这个研究线索','claims':[]},
         remaining_gaps=['外推测试缺失'])
-    note = {'note_id':'note_1','task_id':'T1','question':'边界条件泛化','findings':[
-        {'text':text,'evidence_ids':[evidence.evidence_id]}],
-        'unknowns':['跨数据集未知'],'conflicts':['论文结论不一致'],'limitations':['样本有限']}
+    note = {'task_id':'T1','question':'边界条件泛化', 'content':text,
+        'source_ids':[evidence.evidence_id], 'status':'partial'}
     db.append(run, RunEvent(sequence=1,type='research_task_completed',data={'note':note}))
-    db.append(run, RunEvent(sequence=2,type='gap_reviewed',data={'missing':['外推测试缺失']}))
+    db.append(run, RunEvent(sequence=2,type='supervisor_reviewed',data={'remaining_gaps':['外推测试缺失']}))
     db.append(run, RunEvent(sequence=3,type='run_finished',data={'status':'partial'}))
     return db, retrieval, run, note, evidence
 
 
 def test_research_reconcile_and_manual_reread_use_persisted_notes(tmp_path):
     db, retrieval, run, note, evidence = durable_research(tmp_path)
-    text = note['findings'][0]['text']
+    text = note['content']
     store, service, llm = memory(tmp_path, {'candidates':[extraction(text,message_index=1,memory_type='research_note')]})
     db.close()  # No live events or RunManager survives.
     db = RunStore(tmp_path)
@@ -152,12 +151,12 @@ def test_research_reconcile_and_manual_reread_use_persisted_notes(tmp_path):
         await background.recover()  # Reconciles finished Run whose callback never ran.
         await background.drain()
         saved = store.list()[0]
-        assert (saved.source.run_id,saved.source.research_note_id,saved.source.task_id) == (run.run_id,'note_1','T1')
+        assert (saved.source.run_id,saved.source.research_note_id,saved.source.task_id) == (run.run_id,f'{run.run_id}:T1','T1')
         assert saved.source.evidence_ids == [evidence.evidence_id]
         payload = json.loads(llm.calls[0]['messages'][-1]['content'])
-        assert payload['background']['contract']['objective'] == run.query
+        assert payload['background']['brief']['objective'] == run.query
         assert payload['background']['remaining_gaps'] == ['外推测试缺失']
-        assert payload['background']['research_notes'][0]['conflicts'] == ['论文结论不一致']
+        assert payload['background']['research_notes'][0]['status'] == 'partial'
         llm.responses = iter([{'candidates':[extraction(text,message_index=1,memory_type='research_note')]}])
         repeated = background.enqueue_research(run.run_id,retry=True)
         await background.drain()
@@ -171,16 +170,15 @@ def test_research_reconcile_and_manual_reread_use_persisted_notes(tmp_path):
 def test_checkpoint_research_input_is_authoritative(tmp_path):
     from sage_scholar.runtime.checkpoints import Checkpoints
     from test_v4_recovery import graph
-    from sage_scholar.domain.research import ResearchContract
     db, retrieval, run, note, evidence = durable_research(tmp_path)
     checkpoints = Checkpoints(tmp_path)
-    actual = ResearchContract.from_request(run.execution.model_copy(update={'query':'持久契约指定比较维度'}))
-    list(graph(checkpoints,[]).stream({'research_contract':actual},checkpoints.config(run.run_id),
+    actual = run.execution.model_copy(update={'query':'持久研究目标'})
+    list(graph(checkpoints,[]).stream({'execution':actual},checkpoints.config(run.run_id),
         interrupt_after=['research_node'],durability='sync'))
     run.checkpoint = checkpoints.reference(run.run_id,run.workflow)
     db.append(run,RunEvent(sequence=4,type='run_finished',data={}))
     _, _, background = ResearchMemorySource(db,retrieval,checkpoints).load(run.run_id)
-    assert background['contract']['objective'] == actual.objective
+    assert background['brief']['objective'] == actual.query
     assert background['research_notes'][0]['question'] != note['question']
     checkpoints.close(); db.close()
 
@@ -215,6 +213,6 @@ def test_memory_with_provenance_still_not_a_citation_source(tmp_path):
     from sage_scholar.research.references import reference_catalog
     store, service, _ = memory(tmp_path)
     saved = store.add(value('FNO 比 PINN 好'))
-    context = ResearchEvidenceContext(JsonEvidenceStore(str(tmp_path)),contract().source_policy)
+    context = ResearchEvidenceContext(JsonEvidenceStore(str(tmp_path)),research_request().source_policy)
     with pytest.raises(ValueError):
         reference_catalog(context, [saved.memory_id])

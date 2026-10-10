@@ -6,6 +6,11 @@ import InlineAnswer from "./InlineAnswer";
 import ReportView from "./ReportView";
 import HumanInputCard from "./HumanInputCard";
 
+const taskLabels: Record<string, string> = {
+  pending: "待研究", completed: "已整理", partial: "已整理，存在缺口",
+  failed: "未完成", blocked: "预算限制",
+};
+
 export default function RunCard({ run: saved, refresh, archived = false }: { run: SavedRun; refresh: () => void; archived?: boolean }) {
   const [stream, setStream] = useState<{ id: string; text: string } | null>(null);
   const [notice, setNotice] = useState("");
@@ -54,8 +59,8 @@ export default function RunCard({ run: saved, refresh, archived = false }: { run
           <td>{usage.cache_observed_tokens ? (100 * usage.cached_tokens / usage.cache_observed_tokens).toFixed(1) + "%" : "未提供"}</td><td>{usage.seconds.toFixed(1)}s</td>
         </tr>)}</tbody></table></div>
     </details>}
-    {!!saved.progress?.tasks?.length && <details className="rounded-lg border border-border p-3 text-sm"><summary>研究进度（{saved.progress.tasks.filter(t => t.status === "completed").length}/{saved.progress.tasks.length}）</summary>
-      {saved.progress.tasks.map(t => <p key={t.task_id} className="mt-2">{t.status === "completed" ? "✓" : "·"} {t.objective} · {t.status}</p>)}</details>}
+    {!!saved.progress?.tasks?.length && <details className="rounded-lg border border-border p-3 text-sm"><summary>研究笔记（已整理 {saved.progress.tasks.filter(t => ["completed", "partial"].includes(t.status)).length}/{saved.progress.tasks.length}）</summary>
+      {saved.progress.tasks.map(t => <p key={t.task_id} className="mt-2">{t.status === "completed" ? "✓" : "·"} {t.objective} · {taskLabels[t.status] || t.status}</p>)}</details>}
     {answer && <InlineAnswer answer={answer} evidence={saved.result?.evidence || []} />}
     {saved.result?.report && <div className="rounded-2xl border border-border bg-surface"><ReportView report={saved.result.report} stats={null} /></div>}
     {saved.status === "waiting_for_user" && saved.interrupts?.map(question => <HumanInputCard key={question.interrupt_id} run={saved} question={question} onChange={refresh} />)}

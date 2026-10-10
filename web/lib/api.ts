@@ -147,14 +147,14 @@ export type ResearchEvent =
   | { type: "initializing_tools" | "research_started"; message: string }
   | { type: "tool_available" | "tool_unavailable"; server: string; message: string; reason?: string | null }
   | { type: "plan"; sub_questions: { label: string; question: string }[] }
-  | { type: "research"; question: string; preview: string; tool_call_counts: Record<string, number>; status?: "completed" | "failed" }
+  | { type: "research"; question: string; preview: string; tool_call_counts: Record<string, number>; status?: "completed" | "partial" | "failed" }
   | { type: "review"; round: number; review_summary: { question: string; verdict: string; failed: Record<string, boolean>; evidence?: Record<string, string> }[]; missing_dimensions?: string }
   | { type: "write"; report: string; citations?: Record<string, string>; remaining_gaps?: string[] }
   | { type: "research_planned"; tasks: { task_id: string; objective: string; status: string; revision: number }[] }
   | { type: "research_task_started"; task_id: string }
-  | { type: "research_task_completed"; note: { task_id: string; evidence_ids: string[]; unknowns: string[]; conflicts: string[] } }
-  | { type: "gap_reviewed"; covered: string[]; missing: string[]; unknowns: string[]; conflicts: string[] }
-  | { type: "research_synthesizing" | "report_drafting" | "report_reviewing" | "report_revising"; phase: string; section?: string; section_index?: number }
+  | { type: "research_task_completed"; note: { task_id: string; question: string; content: string; source_ids: string[]; status: "completed" | "partial" | "failed" } }
+  | { type: "supervisor_reviewed"; remaining_gaps: string[]; follow_up_questions: { objective: string; label: string }[] }
+  | { type: "report_drafting" | "research_reviewing"; phase: string }
   | { type: "report_completed"; citations: Record<string, string>; remaining_gaps: string[] }
   | { type: "stats"; total_calls: number; prompt_tokens: number; completion_tokens: number; total_tokens: number }
   | { type: "run_finished"; status: "completed" | "partial"; reason: string | null; remaining_gaps: string[] }
