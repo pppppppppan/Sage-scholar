@@ -157,6 +157,46 @@ def test_recovery_blocks_only_unknown_calls_that_require_manual_review(tmp_path)
     store.close()
 
 
+@pytest.mark.parametrize("status", [RunStatus.FAILED, RunStatus.PARTIAL])
+def test_explicit_failed_or_partial_resume_extends_run_budget(tmp_path, status):
+    store = RunStore(str(tmp_path))
+    request, now = contract().execution, utc_now()
+    request = request.model_copy(update={"run_id": "run", "budget": {
+        "max_total_tokens": 600_000, "max_tool_calls": 100, "max_seconds": 3600,
+    }})
+    snapshot = RunSnapshot(
+        run_id="run", workflow=request.workflow, query="q", execution=request,
+        status=status, event_cursor=1, created_at=now, updated_at=now,
+    )
+    store.append(snapshot, RunEvent(sequence=1, type="run_finished"))
+
+    class CompatibleCheckpoints:
+        @staticmethod
+        def compatible(_snapshot): return True
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    class Runner:
+        async def run(self, request, emit, cancelled):
+            started.set()
+            await release.wait()
+            return RunOutcome(result={"report": "continued"})
+
+    async def scenario():
+        manager = RunManager(store=store, checkpoints=CompatibleCheckpoints())
+        manager.register_runners({request.workflow: Runner()})
+        resumed = await manager.resume("run")
+        assert resumed.execution.budget["max_total_tokens"] == 1_200_000
+        assert resumed.execution.metadata["continuation"] == 1
+        await started.wait()
+        release.set()
+        await manager._tasks["run"]
+        assert manager.get("run").status == RunStatus.COMPLETED
+
+    asyncio.run(scenario())
+    store.close()
+
+
 def test_note_commits_before_graph_checkpoint_and_reuses_on_retry(tmp_path):
     from sage_scholar.domain.research import ResearchTask
     calls = []

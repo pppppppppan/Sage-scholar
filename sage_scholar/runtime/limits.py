@@ -22,7 +22,10 @@ def execution_budget(workflow, requested=None):
                     'max_total_tokens': 600_000,
                     'report_reserve_tokens': 150_000,
                     'max_tool_calls': 100,
-                    'max_steps': 6,
+                    # Four ReAct turns plus final note generation is enough for
+                    # one focused subtask; six turns multiplied across a plan
+                    # routinely consumed the report reserve before synthesis.
+                    'max_steps': 4,
                     'max_rounds': 1,
                     'max_tasks': 8,
                     'max_writer_revisions': 1,

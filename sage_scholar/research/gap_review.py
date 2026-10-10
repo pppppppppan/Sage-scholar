@@ -2,7 +2,7 @@
 from sage_scholar.context.protection import prompt_contract
 from sage_scholar.domain.research import GapReview, FollowUp
 from .structured import structured_response
-from .materials import batches, note_units, encoded
+from .materials import REDUCTION_BATCH_TOKENS, batches, note_units, encoded
 
 
 class GapReviewer:
@@ -11,7 +11,7 @@ class GapReviewer:
 
     def review(self, contract, tasks, notes):
         result = GapReview()
-        for group in batches(note_units(notes)):
+        for group in batches(note_units(notes), limit=REDUCTION_BATCH_TOKENS):
             checked = structured_response(self.llm, GapReview, [
                 {"role": "system", "content": (
                     "作为研究主管，评价这批材料对用户问题的贡献及关键缺口。"

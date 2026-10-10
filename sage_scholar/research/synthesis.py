@@ -1,8 +1,12 @@
 """Cross-paper synthesis, hierarchically reduced at checkpoint boundaries."""
+import logging
+
 from sage_scholar.domain.research import Synthesis
 from sage_scholar.context.protection import prompt_contract
 from .materials import encoded, source_read
 from .structured import structured_response
+
+logger = logging.getLogger(__name__)
 
 
 class ResearchSynthesis:
@@ -26,7 +30,15 @@ class ResearchSynthesis:
         if not result.blocks:
             raise ValueError("综合未返回分析主题")
         if len(result.blocks) > max_blocks:
-            raise ValueError("综合主题超过本次阶段限额")
+            # max_blocks is a generation target, not a correctness boundary.
+            # Synthesis itself validates an absolute maximum of eight blocks and
+            # the graph already performs hierarchical reduction between stages.
+            # Rejecting an otherwise valid 5–8 block response discards completed
+            # research and makes a harmless provider formatting deviation fatal.
+            logger.info(
+                "Synthesis returned %d blocks (soft target %d); hierarchical reduction will continue",
+                len(result.blocks), max_blocks,
+            )
         for block in result.blocks:
             if set(block.evidence_ids) - allowed:
                 raise ValueError("综合引用了输入材料之外的证据")

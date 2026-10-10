@@ -3,6 +3,8 @@ import json
 from sage_scholar.context.token_counter import TokenCounter
 from .note_view import note_prompt_view
 
+REDUCTION_BATCH_TOKENS = 9000
+
 
 def encoded(value):
     return json.dumps(value, ensure_ascii=False)

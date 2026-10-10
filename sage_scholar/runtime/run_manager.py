@@ -153,7 +153,10 @@ class RunManager:
             state.snapshot.reason = issue
             await self._append_event(state, "run_interrupted", {"reason": issue, "restart_required": True})
             raise ValueError(issue)
-        if state.snapshot.status in {RunStatus.PARTIAL, RunStatus.CANCELLED}:
+        # An explicit retry of a failed stage needs fresh headroom as well.  A
+        # failed provider/validation attempt has already consumed its tokens;
+        # retaining the old ceiling makes the retry fail later at synthesis.
+        if state.snapshot.status in {RunStatus.FAILED, RunStatus.PARTIAL, RunStatus.CANCELLED}:
             old = execution_budget(state.snapshot.workflow, state.snapshot.execution.budget)
             ceiling = ExecutionLimits.model_fields
             extension = execution_budget(state.snapshot.workflow)

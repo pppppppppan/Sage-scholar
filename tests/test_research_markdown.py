@@ -178,6 +178,20 @@ def test_synthesis_inputs_exclude_poisoned_diagnostics():
     assert len(payload) < 2000 and "paper full text" not in payload and "不同数据条件" in payload
 
 
+def test_synthesis_block_target_is_soft_and_valid_response_continues(tmp_path):
+    class Model:
+        def invoke(self, **kwargs):
+            return SimpleNamespace(content=json.dumps({"blocks": [
+                {"heading": f"主题 {index}", "analysis": "跨论文分析", "evidence_ids": []}
+                for index in range(5)
+            ]}, ensure_ascii=False), tool_calls=None)
+
+    context = ResearchEvidenceContext(JsonEvidenceStore(str(tmp_path)), contract().source_policy)
+    result = ResearchSynthesis(Model(), context).run(contract(), [{"finding": "材料"}], allowed_ids=[])
+    assert len(result.blocks) == 5
+    assert all(block.limitations for block in result.blocks)
+
+
 def test_shared_source_number_preserves_fragments_and_math(tmp_path):
     context = ResearchEvidenceContext(JsonEvidenceStore(str(tmp_path)), contract().source_policy)
     ids = []
@@ -224,4 +238,3 @@ def test_audit_requests_rejected_old_schema_not_resumed(tmp_path):
         status=RunStatus.RUNNING, created_at=utc_now(), updated_at=utc_now(), checkpoint={"schema":"research-v4-1"})
     assert not cp.compatible(run)
     cp.close()
-

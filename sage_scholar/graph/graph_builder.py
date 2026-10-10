@@ -14,7 +14,7 @@ from sage_scholar.domain.research import (
     Synthesis, ReportOutline, WrittenSection, ReportReview,
 )
 from sage_scholar.research.tasks import follow_up_tasks, validate_tasks
-from sage_scholar.research.materials import batches, note_units, encoded
+from sage_scholar.research.materials import REDUCTION_BATCH_TOKENS, batches, note_units, encoded
 from sage_scholar.research.note_view import sanitize_note
 from sage_scholar.research.references import reference_catalog, check_section, finalize_report
 from sage_scholar.context.token_counter import TokenCounter
@@ -203,7 +203,7 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, synthesi
         return "prepare_synthesis_node"
 
     def prepare_synthesis_node(state):
-        queue = list(batches(note_units(notes(state))))
+        queue = list(batches(note_units(notes(state)), limit=REDUCTION_BATCH_TOKENS))
         if not state.get("evidence_ids") or not queue:
             raise ValueError("未取得可用原文证据，无法生成可信研究报告")
         return {"synthesis_queue": queue, "synthesis_parts": [], "synthesis_level": 0,
@@ -231,7 +231,8 @@ def build_graph(supervisor, create_researcher, writer, *, gap_reviewer, synthesi
             return {"synthesis": Synthesis(blocks=blocks), "synthesis_queue": []}
         if state["synthesis_level"] >= 3:
             raise ValueError("研究综合未能在预算内收敛，材料已保存，请缩小研究范围")
-        return {"synthesis_queue": list(batches([b.model_dump() for b in blocks])),
+        return {"synthesis_queue": list(batches(
+                    [b.model_dump() for b in blocks], limit=REDUCTION_BATCH_TOKENS)),
                 "synthesis_parts": [], "synthesis_level": state["synthesis_level"] + 1}
 
     def combine_route(state):
