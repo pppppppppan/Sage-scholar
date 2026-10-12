@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sage_scholar.api.app import create_app
 from sage_scholar.application.query_service import QueryResult, QueryStatus
 from sage_scholar.routing import QueryRouter
+from router_fakes import FixedClassifier
 
 
 class FakeQueryService:
@@ -15,7 +16,7 @@ class FakeQueryService:
         self.last_command = command
         return QueryResult(
             request_id="request-1",
-            route=QueryRouter().route(command.query),
+            route=QueryRouter(FixedClassifier()).route(command.query),
             status=QueryStatus.INLINE,
             answer="今天是星期四。",
         )
@@ -109,7 +110,7 @@ def test_library_upload_qa_evidence_and_sse_compatibility(tmp_path):
     container.run_manager = manager
     container.evidence_store = retrieval.evidence_store
     container.document_service = DocumentService(None, config.data_dir, lambda: pipeline)
-    container.query_service = QueryService(QueryRouter(), DirectService(model), QAService(retrieval, model),
+    container.query_service = QueryService(QueryRouter(FixedClassifier("qa")), DirectService(model), QAService(retrieval, model),
                                             manager, {Workflow.DEEP_RESEARCH: PartialRunner()},
                                             document_resolver=DocumentResolver(retrieval.documents))
     with TestClient(create_app(container)) as client:
@@ -123,26 +124,30 @@ def test_library_upload_qa_evidence_and_sse_compatibility(tmp_path):
         assert client.get("/api/library").json()[0]["document_id"] == document["document_id"]
         # User can name a successfully uploaded paper without manually supplying its UUID.
         automatic = client.post("/api/queries", json={"query": "34552这篇论文使用了哪些数据集？训练集和测试集是怎么划分的？"})
-        assert automatic.status_code == 200
-        auto = automatic.json()
-        assert auto["status"] == "inline" and auto["route"]["workflow"] == "qa"
-        assert auto["route"]["document_ids"] == [document["document_id"]]
-        assert auto["route"]["allow_web"] is False
-        assert auto["evidence"][0]["document_id"] == document["document_id"]
+        assert automatic.status_code == 202
+        rid = automatic.json()["run_id"]
+        client.get(f"/api/runs/{rid}/events")
+        auto = client.get(f"/api/runs/{rid}").json()["run"]
+        assert auto["status"] == "completed" and auto["workflow"] == "qa"
+        assert auto["execution"]["document_ids"] == [document["document_id"]]
+        assert auto["execution"]["allow_web"] is False
+        assert auto["result"]["evidence"][0]["document_id"] == document["document_id"]
         response = client.post("/api/queries", json={
             "query": "论文用了什么数据集", "workflow": "qa",
             "source_scope": "selected_documents", "document_ids": [document["document_id"]],
             "allow_web": False,
         })
-        assert response.status_code == 200, response.text
-        payload = response.json()
+        assert response.status_code == 202, response.text
+        rid = response.json()["run_id"]
+        client.get(f"/api/runs/{rid}/events")
+        payload = client.get(f"/api/runs/{rid}").json()["run"]["result"]
         assert payload["citations"]["1"] == payload["evidence"][0]["evidence_id"]
         evidence_id = payload["evidence"][0]["evidence_id"]
         saved = client.get("/api/evidence/" + evidence_id).json()
         assert saved["document_id"] == document["document_id"]
         assert saved["page"] is None
         assert saved["original_text"] == saved["text"]
-        response = client.post("/api/queries", json={"query": "调研 AI"})
+        response = client.post("/api/queries", json={"query": "调研 AI", "workflow": "deep_research"})
         assert response.status_code == 202
         run_id = response.json()["run_id"]
         events = client.get(f"/api/runs/{run_id}/events")

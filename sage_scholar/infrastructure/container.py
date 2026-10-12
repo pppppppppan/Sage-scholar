@@ -9,6 +9,7 @@ from sage_scholar.application.research_service import ResearchService
 from sage_scholar.config import Config
 from sage_scholar.research.runtime import ResearchRuntimeProvider
 from sage_scholar.routing import QueryRouter, Workflow
+from sage_scholar.routing.classifier import LocalClassifier
 from sage_scholar.runtime import RunManager
 from sage_scholar.runtime.store import RunStore
 from sage_scholar.runtime.checkpoints import Checkpoints
@@ -62,17 +63,15 @@ class ApplicationContainer:
             pipeline_factory=lambda: self.retrieval.pipeline,
         )
         self.query_service = QueryService(
-            router=QueryRouter(),
+            router=QueryRouter(LocalClassifier(self.config.router), confidence_threshold=self.config.router.confidence_threshold),
             document_resolver=DocumentResolver(self.retrieval.documents),
             direct=DirectService(self.model_gateway, context_manager=self.context_manager),
             qa=QAService(self.retrieval, self.model_gateway, context_manager=self.context_manager),
             run_manager=self.run_manager,
             long_runners=self.runners,
             memory_store=self.memory_service,
-            memory_background=self.memory_background,
         )
 
-        self.runners.update({Workflow.DIRECT: self.query_service.inline_runner, Workflow.QA: self.query_service.inline_runner})
         from sage_scholar.conversations.service import ConversationService
         self.conversations = ConversationService(self.run_store.conversations, self.run_manager,
             self.query_service, self.memory_background)

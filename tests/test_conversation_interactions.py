@@ -18,6 +18,7 @@ from sage_scholar.routing import Workflow, QueryRouter
 from sage_scholar.graph.graph_builder import build_graph
 from sage_scholar.research.continuation import continue_graph
 from research_fakes import research_request, FakeSupervisor, FakeResearcher, FakeWriter
+from router_fakes import FixedClassifier
 
 class Direct:
     def __init__(self): self.calls = []
@@ -36,8 +37,7 @@ def setup(tmp_path):
     direct = Direct()
     manager = RunManager(store=store, checkpoints=checkpoints)
     runners = {Workflow.DEEP_RESEARCH: Runner()}
-    query = QueryService(QueryRouter(), direct, None, manager, runners)
-    runners[Workflow.DIRECT] = query.inline_runner
+    query = QueryService(QueryRouter(FixedClassifier()), direct, None, manager, runners)
     manager.register_runners(runners)
     conversations = ConversationService(store.conversations, manager, query, None)
     async def close():

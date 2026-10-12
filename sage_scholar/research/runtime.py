@@ -143,7 +143,7 @@ class ResearchRuntime:
             "source_policy": policy.model_dump(mode="json"),
             "available_tools": [tool.name for tool in available],
         }}
-        if not any(t.name != "read_context_artifact" for t in available) and not (durable and self.checkpoints.saver.get_tuple(self.checkpoints.config(request.run_id))):
+        if not any(t.name != "read_context_artifact" for t in available) and not (durable and self.checkpoints.saver.get_tuple(self.checkpoints.research_config(request))):
             yield {"outcome_node": {"remaining_gaps": ["资料策略下没有可用工具，无法进行有证据的研究"]}}
             return
 
@@ -183,7 +183,7 @@ class ResearchRuntime:
             interaction=(lambda req: assess(req, self.llm_client)) if durable else None,
         )
         final_report = None
-        graph_config = self.checkpoints.config(request.run_id) if durable else {}
+        graph_config = self.checkpoints.research_config(request) if durable else {}
         graph_config["recursion_limit"] = 250 + 3 * request.budget["max_tasks"] * (request.budget["max_rounds"] + 1)
         snapshot = graph.get_state(graph_config) if durable else None
         if durable and snapshot:

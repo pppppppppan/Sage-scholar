@@ -13,6 +13,7 @@ from sage_scholar.runtime import RunManager, RunStatus
 from sage_scholar.tools import BaseTool, ToolRegistry, ToolCallError
 from sage_scholar.tools.policy import PolicyTool
 from test_query_service import FakeModel, FakeRetrieval
+from router_fakes import FixedClassifier
 
 
 class ExternalTool(BaseTool):
@@ -72,7 +73,7 @@ def test_router_contract_reaches_actual_research_service_runtime(scope, ids):
                 return Runtime()
         manager = RunManager()
         model = FakeModel()
-        service = QueryService(QueryRouter(), DirectService(model), QAService(FakeRetrieval(), model),
+        service = QueryService(QueryRouter(FixedClassifier("deep_research")), DirectService(model), QAService(FakeRetrieval(), model),
                                manager, {Workflow.DEEP_RESEARCH: ResearchService(Provider())})
         result = await service.execute(QueryCommand(
             query="调研我的资料", source_scope=scope, document_ids=ids,
@@ -80,7 +81,7 @@ def test_router_contract_reaches_actual_research_service_runtime(scope, ids):
         ))
         events = [event async for event in manager.events(result.run_id)]
         request = seen["request"]
-        assert request.source_scope == result.route.source_scope == scope
+        assert request.source_scope == manager.get(result.run_id).execution.source_scope == scope
         assert request.document_ids == tuple(ids)
         assert request.allow_web is False
         assert request.conversation_id == "conversation-a"
@@ -102,7 +103,7 @@ def test_partial_outcome_is_not_completed():
                 return RunOutcome(status="partial", result={"report": "some findings"},
                                   reason="step budget exhausted", remaining_gaps=["experiment settings"])
         from sage_scholar.domain.execution import ExecutionRequest
-        route = QueryRouter().route("调研 AI")
+        route = QueryRouter(FixedClassifier("deep_research")).route("调研 AI")
         request = ExecutionRequest(query="调研 AI", **route.model_dump(exclude={
             "needs_clarification", "clarification_message", "reason_code"}))
         manager = RunManager()
@@ -118,6 +119,6 @@ def test_partial_outcome_is_not_completed():
 
 
 def test_empty_selected_documents_never_falls_back_to_workspace():
-    route = QueryRouter().route("调研论文", requested_scope=SourceScope.SELECTED_DOCUMENTS)
+    route = QueryRouter(FixedClassifier("deep_research")).route("调研论文", requested_scope=SourceScope.SELECTED_DOCUMENTS)
     assert route.needs_clarification
     assert not SourcePolicy(source_scope=SourceScope.SELECTED_DOCUMENTS).permits_document("any")

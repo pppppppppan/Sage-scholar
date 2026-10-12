@@ -1,21 +1,63 @@
 # SAGE Scholar
 
-SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。支持 Direct、文档 QA、异步 Deep Research，独立 Citation Audit 已移除，并统一上下文预算、自动长期 Memory 和可恢复 Run。统一查询接口先经过 Router，再按任务复杂度选择执行链。FastAPI 只处理协议，业务编排集中在 `QueryService`，长任务生命周期由 `RunManager` 管理，研究 Graph 只维护 workflow 内部状态。
+SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。所有新查询先创建持久 Run，再进入统一 LangGraph；本机轻量模型负责语义分类，条件边进入 Direct、文档 QA、Clarify 或现有 Deep Research 子图。RunManager 管理生命周期、预算和 SSE，LangGraph 管理 workflow 状态。
 
 ```mermaid
-flowchart LR
-    UI[Next.js Web UI] --> API[FastAPI]
-    API --> QS[QueryService]
-    QS --> R[QueryRouter]
-    R --> D[DirectService]
-    R --> QA[QAService]
-    R --> RM[RunManager]
-    QA --> RET[Retrieval + EvidenceRef]
-    RM --> RS[ResearchService]
-    RS --> LG[LangGraph Research Workflow]
-    RM --> SSE[SSE Events]
-    SSE --> UI
+flowchart TD
+    UI[Next.js Web UI] --> API[FastAPI / QueryService]
+    API --> RM[RunManager / SQLite / SSE]
+    RM --> R[QueryGraph: 本地语义 Router]
+    R -->|direct| D[DirectService]
+    R -->|qa| QA[QAService / Retrieval / Evidence]
+    R -->|clarify| C[Clarify: interrupt]
+    C -->|用户回答 / Command resume| R
+    R -->|deep_research| RS[现有 Research 子图]
+    RS --> S[Supervisor / 并行 Researcher / Review / Writer]
+    D --> E[保存结果 / END]
+    QA --> E
+    S --> E
 ```
+
+## 本地语义 Router 与统一入口图（2026-10-12）
+
+- 默认通过本机 Ollama 的 `/api/chat` 使用 `qwen3.5:2b`，结构化输出 workflow、资料范围、文档 ID、联网需求、置信度和澄清问题。分类参考本轮问题、最近 6 条有限长度的对话、所选文档和最多 50 条文献目录；不会发送完整论文、Memory provenance 或研究工具输出。
+- 不再用关键词/正则决定 Direct、QA、Research。未勾选文档时由模型结合目录解析论文指代，文件名出现在句子里不会自动成为强制资料范围；仅保留明确“记住：…”命令的操作识别。服务端仍校验文档身份和 SourcePolicy，模型不能扩大显式文档范围或绕过 `allow_web=false`。
+- 分类服务只允许 loopback 地址，绕开环境代理。连接失败、超时或无效 JSON 会明确显示失败，可在修复部署后继续原任务；不会静默回退到云端或关键词。低置信度/缺少必要输入进入持久化 Clarify，最多 3 次澄清。
+- `/api/queries` 对 Direct/QA 也返回 `202 accepted + run_id`；前端统一通过 Run/SSE 显示结果和停止按钮。等待用户期间保留同一 Run，刷新或重启后仍可回答。切换页面不取消任务。
+- 原 Research 内部算法保持不变。外层图 checkpoint 使用 `run_id` / `semantic-query-v1`，Research 子图私有状态使用 `run_id:research` / 原图结构；预算、工具记录、Evidence、研究笔记仍归属于同一个 Run。继续研究不会重新分类，也不会重新执行已完成的子题。删除 Run 会删除两份图 checkpoint。
+- 已持久化的旧 Research Run 继续按原图恢复；旧 Direct/QA 没有 checkpoint 的中断任务需重新开始，不能伪造恢复。Context Manager、Memory 和 Evidence 继续由原服务复用。
+- 本地分类 token 和耗时单独记入 `router` 阶段，并计入累计 Run 预算；不产生云端分类费用。回答、研究和后台 Memory 的模型配置不变。
+
+### 部署并检查 Router
+
+先安装并启动 [Ollama](https://ollama.com/download)。本机已运行 Ollama 应用时不用重复执行 `ollama serve`；命令行方式可在另一个终端执行：
+
+```bash
+ollama serve
+```
+
+下载模型后进行真实分类检查（模型下载仅首次需要）：
+
+```bash
+ollama pull qwen3.5:2b
+cd /Users/pan/Desktop/1/sage-scholar
+conda activate deep-research
+python -m sage_scholar.routing.check --query '不要调研，只解释一下 KL 散度'
+python -m sage_scholar.routing.check --query '帮我调研 On-Policy Distillation 的主要方法'
+```
+
+期望分别返回 `direct` 和 `deep_research`。默认配置已可使用，也可以在 `.env` 设置：
+
+```dotenv
+ROUTER_BASE_URL=http://127.0.0.1:11434
+ROUTER_MODEL=qwen3.5:2b
+ROUTER_TIMEOUT=60
+ROUTER_CONFIDENCE_THRESHOLD=0.65
+```
+
+预热后按原方式 `./setup.sh` 启动项目。脚本不自动安装 Ollama 或下载模型；模型加载较慢时可调高超时。模型必须支持 Ollama 结构化输出，置信度仍是模型自评，需要用自己的问题检查实际分类质量。
+
+参考：[Ollama Chat API](https://docs.ollama.com/api/chat)、[Qwen3.5 2B](https://ollama.com/library/qwen3.5:2b)、[LangGraph 私有状态子图调用](https://docs.langchain.com/oss/python/langgraph/use-subgraphs)。
 
 ## Deep Research 主链简化（2026-10-10）
 
@@ -88,7 +130,7 @@ flowchart LR
 
 ## 当前可以运行的功能
 
-- `Direct`：日期、星期等本地确定性问题不调用模型；其他简单问题通过统一 Model Gateway 回答。
+- `Direct`：经过本地语义分类后，日期、星期由本地时钟回答；其他简单问题通过原 Model Gateway 回答。
 - 连续对话：回答后保留输入框和本轮消息，本轮历史交给统一 Context Manager，保留近期对话并汇总较早历史，单独保护明确限制；点击“新对话”可清空本轮上下文。
 - `QA`：从上传的论文/文档进行 BM25 + 向量检索、RRF、rerank，并以结构化 `EvidenceRef` 返回证据。
 - `Deep Research`：复用 SAGE Research 的 LangGraph 与并行 ReAct，现为 ExecutionRequest → Supervisor Plan → 并行 Researcher → Supervisor Review → 整篇 Writer，由后台 `Run` 执行并通过 SSE 推送进度。
@@ -97,7 +139,7 @@ flowchart LR
 - 长任务：创建、查询、取消、持久化 SSE 回放、兼容 checkpoint 恢复、显式重新开始；状态保存在本地 SQLite。
 - 自适应路由：`今天是星期几` 走 Direct，`帮我调研 AI4CFD 领域的主要方法` 走 Deep Research；指代论文但未选择文档时返回澄清提示。
 
-Router 已为 `Search` 和 `Paper2Code` 建立稳定枚举与返回协议，但这两条执行链尚未接入，调用时会明确返回 `not_implemented`，不会伪造结果。
+独立 `Search`、`Citation Audit` 和 `Paper2Code` 尚无入口执行链，显式 API 请求会被拒绝。需要外部资料的查询进入 Deep Research；路由模型识别出未支持的任务时请求澄清，不承诺虚假结果。
 
 ## 目录
 
@@ -106,12 +148,12 @@ sage-scholar/
 ├── sage_scholar/
 │   ├── api/              # HTTP、schema、SSE
 │   ├── application/      # Query/Direct/QA/Research/Document services
-│   ├── routing/          # workflow 与 source policy 判断
+│   ├── routing/          # 本地模型分类 / schema / SourcePolicy 校验 / check 命令
 │   ├── runtime/          # SQLite Run/事件/预算、工具 journal、LangGraph checkpoint
 │   ├── domain/           # Evidence 等共享领域模型
 │   ├── infrastructure/   # 依赖组装与旧实现 adapter
 │   ├── research/         # Deep Research runtime
-│   ├── graph/            # LangGraph workflow
+│   ├── graph/            # QueryGraph 统一入口 + Research 子图
 │   ├── rag/              # hybrid retrieval
 │   ├── memory/           # 自动长期记忆、召回与用户管理
 │   ├── context/          # 完整请求预算、保护信息、artifact 外置与回读
@@ -131,6 +173,7 @@ sage-scholar/
 - Python `3.11–3.14`，推荐 `3.12`
 - Node.js `24.21.0`；仓库提供 `.nvmrc`，与你当前终端版本一致
 - npm
+- Ollama + 本地 `qwen3.5:2b`（Router 使用；其他模型仍走原 provider）
 
 macOS 推荐使用 CPU/MPS 版 PyTorch，不要安装 CUDA wheel：
 
@@ -152,7 +195,7 @@ cp .env.example .env
 - 普通 Direct 和 Deep Research 需要所选 LLM provider 的 key。
 - 文档 QA/入库默认使用本地 Embedding，无需向量 API Key；首次使用需下载模型。
 - Tavily、GitHub 和其他 MCP 服务都是可选项；未配置的服务会被跳过。
-- `/api/health`、日期/星期 Direct 和 Router 测试不需要任何 key。
+- `/api/health` 无模型依赖；实际查询需要本地 Router 就绪。日期回答本身无需云端 key，单元测试使用分类器替身，不代表真实模型质量验证。
 
 ## 启动
 

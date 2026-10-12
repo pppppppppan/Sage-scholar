@@ -9,6 +9,7 @@ from sage_scholar.domain import research, execution
 from sage_scholar.routing import models
 
 SCHEMAS = {"deep_research": "research-supervisor-markdown-v2"}
+ENTRY_SCHEMA = "semantic-query-v1"
 
 
 class Checkpoints:
@@ -24,15 +25,23 @@ class Checkpoints:
 
     @staticmethod
     def config(run_id):
-        return {"configurable": {"thread_id": run_id}, "recursion_limit": 2000}
+        return {"configurable": {"thread_id": run_id, "checkpoint_ns": ""}, "recursion_limit": 2000}
+
+    @classmethod
+    def research_config(cls, request):
+        identity = request.run_id + ":research" if request.metadata.get("_entry_graph") else request.run_id
+        return cls.config(identity)
 
     def reference(self, run_id, workflow):
         checkpoint = self.saver.get_tuple(self.config(run_id))
-        return {"thread_id": run_id, "schema": SCHEMAS.get(str(workflow)),
+        values = checkpoint.checkpoint.get("channel_values", {}) if checkpoint else {}
+        schema = ENTRY_SCHEMA if values.get("entry_version") == ENTRY_SCHEMA else SCHEMAS.get(str(workflow))
+        return {"thread_id": run_id, "schema": schema,
                 "checkpoint_id": checkpoint.config["configurable"]["checkpoint_id"] if checkpoint else None}
 
     def compatible(self, snapshot):
-        if str(snapshot.workflow) not in SCHEMAS or snapshot.schema_version != 4 or snapshot.checkpoint.get("schema") != SCHEMAS.get(str(snapshot.workflow)):
+        expected = ENTRY_SCHEMA if snapshot.execution.metadata.get("_entry_graph") == ENTRY_SCHEMA else SCHEMAS.get(str(snapshot.workflow))
+        if expected is None or snapshot.schema_version != 4 or snapshot.checkpoint.get("schema") != expected:
             return False
         try:
             return self.saver.get_tuple(self.config(snapshot.run_id)) is not None
@@ -45,6 +54,7 @@ class Checkpoints:
 
     def delete(self, run_id):
         self.saver.delete_thread(run_id)
+        self.saver.delete_thread(run_id + ":research")
 
     def close(self):
         self.conn.close()

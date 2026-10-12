@@ -15,6 +15,11 @@ class DocumentResolver:
     def __init__(self, documents):
         self._documents = documents
 
+    async def catalog(self):
+        documents = await asyncio.to_thread(self._documents.list)
+        return [{"document_id": d.document_id, "title": d.title[:160],
+                 "ready": bool(d.active_version and d.converted_path)} for d in documents]
+
     async def resolve(self, query: str, selected_ids: list[str]) -> DocumentResolution:
         documents = await asyncio.to_thread(self._documents.list)
         if selected_ids:

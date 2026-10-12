@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 
 class Workflow(StrEnum):
+    ROUTER = "router"
+    CLARIFY = "clarify"
     DIRECT = "direct"
     QA = "qa"
     SEARCH = "search"
@@ -36,3 +38,4 @@ class RouteDecision(BaseModel):
     needs_clarification: bool = False
     clarification_message: str | None = None
     reason_code: str
+    confidence: float = Field(default=1, ge=0, le=1)

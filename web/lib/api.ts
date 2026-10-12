@@ -1,6 +1,8 @@
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
 export type Workflow =
+  | "router"
+  | "clarify"
   | "direct"
   | "qa"
   | "search"
@@ -139,6 +141,8 @@ export async function uploadFile(file: File): Promise<SaveReportResult> {
 export interface HumanQuestion { interrupt_id: string; question: string; reason: string; options: string[]; allow_skip: boolean }
 
 export type ResearchEvent =
+  | { type: "routing"; message: string }
+  | { type: "route_selected"; route: QueryResponse["route"] }
   | { type: "answer_delta"; text: string }
   | { type: "answer"; answer: string }
   | { type: "waiting_for_user"; interrupts: HumanQuestion[] }

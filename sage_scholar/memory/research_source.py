@@ -25,7 +25,7 @@ class ResearchMemorySource:
             raise ValueError("请选择已完成或 PARTIAL 的持久化研究任务")
         values, notes, review = {}, {}, {}
         if self.checkpoints and self.checkpoints.compatible(run):
-            checkpoint = self.checkpoints.saver.get_tuple(self.checkpoints.config(run_id))
+            checkpoint = self.checkpoints.saver.get_tuple(self.checkpoints.research_config(run.execution))
             values = checkpoint.checkpoint.get("channel_values", {}) if checkpoint else {}
         for event in self.store.events_for(run_id):
             if event.type == "research_task_completed":

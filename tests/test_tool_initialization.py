@@ -14,6 +14,7 @@ from sage_scholar.research.runtime import ResearchRuntime, ResearchRuntimeProvid
 from sage_scholar.routing import SourceScope, Workflow, ExecutionMode
 from test_document_evidence import library
 from test_query_service import FakeModel
+from router_fakes import FixedClassifier
 from test_research_runtime import build_runtime
 
 
@@ -26,6 +27,7 @@ def test_direct_and_local_qa_do_not_initialize_mcp(monkeypatch, library):
     import sage_scholar.infrastructure.container as module
     monkeypatch.setattr(module, "LegacyRetrievalAdapter", lambda _: adapter)
     monkeypatch.setattr(module, "LegacyModelGateway", lambda _: FakeModel("Method A [1]"))
+    monkeypatch.setattr(module, "LocalClassifier", lambda _: FixedClassifier())
     monkeypatch.setattr("sage_scholar.research.runtime.iter_mcp_clients", forbidden)
     monkeypatch.setattr("sage_scholar.research.runtime.create_mcp_clients", forbidden)
     async def scenario():
@@ -33,7 +35,10 @@ def test_direct_and_local_qa_do_not_initialize_mcp(monkeypatch, library):
         direct = await container.query_service.execute(QueryCommand(query="解释 KL 散度", workflow=Workflow.DIRECT))
         qa = await container.query_service.execute(QueryCommand(query="论文的方法是什么", workflow=Workflow.QA,
             source_scope=SourceScope.SELECTED_DOCUMENTS, document_ids=[a.document_id], allow_web=False))
-        assert direct.answer and qa.answer and qa.evidence
+        await asyncio.gather(*list(container.run_manager._tasks.values()))
+        direct_run = container.run_manager.get(direct.run_id)
+        qa_run = container.run_manager.get(qa.run_id)
+        assert direct_run.result["answer"] and qa_run.result["answer"] and qa_run.result["evidence"]
         assert container.runtime_provider._runtimes == {} and container.runtime_provider._library_clients == []
         await container.close()
     asyncio.run(scenario())

@@ -26,6 +26,14 @@ class ContextConfig:
 
 
 @dataclass
+class RouterConfig:
+    base_url: str = field(default_factory=lambda: os.getenv("ROUTER_BASE_URL", "http://127.0.0.1:11434"))
+    model: str = field(default_factory=lambda: os.getenv("ROUTER_MODEL", "qwen3.5:2b"))
+    timeout: float = field(default_factory=lambda: float(os.getenv("ROUTER_TIMEOUT", "60")))
+    confidence_threshold: float = field(default_factory=lambda: float(os.getenv("ROUTER_CONFIDENCE_THRESHOLD", "0.65")))
+
+
+@dataclass
 class Config:
     config_dir: str = field(default_factory=lambda: os.getenv("SAGE_CONFIG_DIR", str(PROJECT_DIR / "configs")))
     data_dir: str = field(default_factory=lambda: os.getenv("SAGE_DATA_DIR", str(PROJECT_DIR / "data")))
@@ -34,3 +42,4 @@ class Config:
     max_steps: int = 3
     llm: LLMConfig = field(default_factory=LLMConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
+    router: RouterConfig = field(default_factory=RouterConfig)

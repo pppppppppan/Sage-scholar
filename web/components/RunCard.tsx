@@ -25,7 +25,8 @@ export default function RunCard({ run: saved, refresh, archived = false }: { run
     const stop = startRunEvents(saved.run_id, (event: ResearchEvent) => {
       if (!live) return;
       if (event.type === "answer_delta") { streamed += event.text; setStream({ id: saved.run_id, text: streamed }); }
-      if (["initializing_tools", "tool_unavailable", "research_started"].includes(event.type) && "message" in event) setNotice(event.message);
+      if (["routing", "initializing_tools", "tool_unavailable", "research_started"].includes(event.type) && "message" in event) setNotice(event.message);
+      if (event.type === "route_selected") sync();
       if (["run_finished", "run_cancelled", "run_interrupted", "waiting_for_user", "error", "cancel_requested"].includes(event.type)) sync();
       if (event.type === "connection_error") { setNotice(event.message); sync(); }
     }, saved.event_cursor);
@@ -69,7 +70,7 @@ export default function RunCard({ run: saved, refresh, archived = false }: { run
     {error && <p role="alert" className="text-error text-sm">{error}</p>}
     {!active && !archived && saved.status !== "waiting_for_user" && <div className="flex gap-4 text-sm">
       {["partial", "interrupted", "failed", "cancelled"].includes(saved.status) && <>
-        {saved.workflow === "deep_research" && <button disabled={busy || saved.restart_required} onClick={() => void action(() => runAction(saved.run_id, "resume"))}>继续研究</button>}
+        <button disabled={busy || saved.restart_required} onClick={() => void action(() => runAction(saved.run_id, "resume"))}>{saved.workflow === "deep_research" ? "继续研究" : "继续任务"}</button>
         <button disabled={busy} onClick={() => void action(() => runAction(saved.run_id, "restart"))}>重新执行</button>
       </>}
     </div>}

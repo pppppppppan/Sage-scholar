@@ -40,10 +40,19 @@ class RunManager:
         self._tasks: dict[str, asyncio.Task] = {}
         self._semaphore = asyncio.Semaphore(max_concurrent_runs)
         self._runners = {}
+        self._entry_runner = None
         self._closing = False
 
     def register_runners(self, runners):
         self._runners = runners
+
+    def register_entry_runner(self, runner):
+        self._entry_runner = runner
+
+    def _runner(self, run):
+        if run.execution.metadata.get("_entry_graph"):
+            return self._entry_runner
+        return self._runners.get(run.workflow)
 
     def _assert_conversation_idle(self, request, excluding=None):
         if not self.store or not request.conversation_id:
@@ -132,7 +141,7 @@ class RunManager:
             return "unknown_execution_state：存在未确认结果的外部调用；不能自动重放，请核查后明确重新开始。"
         if not self.checkpoints or not self.checkpoints.compatible(run):
             return "restart_required：checkpoint 缺失或 schema 不兼容。"
-        if run.workflow not in self._runners:
+        if self._runner(run) is None:
             return "restart_required：当前版本没有该 workflow runner。"
         return None
 
@@ -172,7 +181,7 @@ class RunManager:
         state.snapshot.restart_required = False
         self._set_status(state, RunStatus.PENDING)
         await self._append_event(state, "run_resumed", {"same_run": True})
-        self._launch(state, self._runners[state.snapshot.workflow])
+        self._launch(state, self._runner(state.snapshot))
         return self.get(run_id)
 
     async def restart(self, run_id):
@@ -183,7 +192,7 @@ class RunManager:
             raise ValueError("请先取消正在运行的任务")
         request = state.snapshot.execution.model_copy(update={"run_id": None, "request_id": uuid.uuid4().hex, "metadata": {
             **state.snapshot.execution.metadata, "restarted_from": run_id}})
-        runner = self._runners.get(request.workflow)
+        runner = self._runner(state.snapshot)
         if not runner:
             raise ValueError("workflow unavailable")
         return await self.start(request, runner)
@@ -212,7 +221,7 @@ class RunManager:
         previous = self._tasks.get(run_id)
         if previous and not previous.done():
             await asyncio.shield(previous)
-        self._launch(state, self._runners[state.snapshot.workflow])
+        self._launch(state, self._runner(state.snapshot))
         return self.get(run_id)
 
     async def cancel(self, run_id):
@@ -339,7 +348,18 @@ class RunManager:
     async def _append_event(self, state, event_type, data):
         if state.control and state.snapshot.status != RunStatus.WAITING_FOR_USER:
             state.control.meter()
-        if event_type in {"initializing_tools", "tool_unavailable", "research_started"}:
+        if event_type == "route_selected":
+            execution = ExecutionRequest.model_validate(data["execution"])
+            if execution.run_id != state.snapshot.run_id:
+                raise ValueError("路由结果不属于当前 Run")
+            state.snapshot.execution = execution
+            state.snapshot.workflow = execution.workflow
+            state.snapshot.progress["route"] = data["route"]
+            state.snapshot.progress["message"] = {
+                "direct": "正在回答…", "qa": "正在读取文献…", "clarify": "需要补充信息…",
+                "deep_research": "正在准备研究…",
+            }.get(str(execution.workflow), "正在处理…")
+        elif event_type in {"routing", "initializing_tools", "tool_unavailable", "research_started"}:
             state.snapshot.progress["message"] = data.get("message", "")
         elif event_type == "research_planned":
             tasks = {t["task_id"]: t for t in state.snapshot.progress.get("tasks", [])}

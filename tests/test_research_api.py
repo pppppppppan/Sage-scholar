@@ -15,6 +15,7 @@ from sage_scholar.routing import QueryRouter, Workflow
 from sage_scholar.runtime import RunManager
 from test_document_evidence import library
 from test_query_service import FakeModel
+from router_fakes import FixedClassifier
 
 
 @pytest.mark.parametrize("tool_limit", [1, 60])
@@ -62,7 +63,7 @@ def test_research_api_citations_progress_and_partial(monkeypatch, tmp_path, libr
             await manager.shutdown()
     container = Container()
     container.config, container.run_manager, container.evidence_store = config, manager, adapter.evidence_store
-    container.query_service = QueryService(QueryRouter(), DirectService(FakeModel()), None, manager,
+    container.query_service = QueryService(QueryRouter(FixedClassifier("deep_research")), DirectService(FakeModel()), None, manager,
         {Workflow.DEEP_RESEARCH: ResearchService(Provider())})
     before_chunks = len(pipeline.vector_store.chunks)
     with TestClient(create_app(container)) as client:

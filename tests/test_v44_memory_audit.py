@@ -64,17 +64,18 @@ def test_task_aware_recall_cache_and_revision_invalidation(tmp_path):
 
 
 @pytest.mark.parametrize("workflow", [Workflow.DIRECT, Workflow.QA])
-def test_inline_completion_schedules_extraction_without_waiting(tmp_path, workflow):
+def test_graph_completion_schedules_extraction_without_waiting(tmp_path, workflow):
     async def scenario():
         text = "这个项目以后都不考虑多用户架构"
         store, memories, _ = memory(tmp_path, {"candidates": [extraction(text)]})
         db = RunStore(tmp_path)
         background = MemoryBackground(memories, None, MemoryJobStore(db))
         service, manager, _ = make_service()
-        service._memory_background = background
+        manager.on_completed = background.completed
         result = await service.execute(QueryCommand(query=text, workflow=workflow,
             document_ids=["paper-a"] if workflow == Workflow.QA else [], workspace_id="sage", session_id="s1"))
-        assert result.answer
+        await manager._tasks[result.run_id]
+        assert manager.get(result.run_id).result["answer"]
         await asyncio.wait_for(background.drain(), timeout=3)
         assert store.list(workspace_id="sage")[0].source.reference == result.request_id
         await background.close()
@@ -89,10 +90,11 @@ def test_background_model_failure_cannot_fail_response(tmp_path):
         db = RunStore(tmp_path)
         background = MemoryBackground(memories, None, MemoryJobStore(db))
         service, manager, _ = make_service()
-        service._memory_background = background
+        manager.on_completed = background.completed
         background.jobs.MAX_ATTEMPTS = 1
         result = await service.execute(QueryCommand(query="介绍一下方法", workflow=Workflow.DIRECT))
-        assert result.answer
+        await manager._tasks[result.run_id]
+        assert manager.get(result.run_id).result["answer"]
         await asyncio.wait_for(background.drain(), timeout=3)
         assert not memories.list()
         await background.close()
