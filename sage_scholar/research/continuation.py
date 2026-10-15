@@ -18,11 +18,8 @@ def continue_graph(graph, config, snapshot, request):
     tasks = {key: task.model_copy(update={"status": "pending", "revision": task.revision + 1})
              for key, task in state.get("tasks", {}).items() if task.status in {"failed", "blocked"}}
     review = state.get("supervisor_review")
-    # Reconsider unresolved questions with all prior notes; never reopen completed researchers.
-    if review and not review.follow_up_questions and review.remaining_gaps:
-        from sage_scholar.domain.research import SubQuestion
-        review = review.model_copy(update={"follow_up_questions": [
-            SubQuestion(objective=gap, label="定向补充") for gap in review.remaining_gaps[:3]]})
+    # Gaps are not executable tasks. With no already-reviewed follow-ups, continuation
+    # routes back through Supervisor Review using all preserved notes and task identities.
     graph.update_state(config, {"execution": execution, "tasks": tasks, "supervisor_review": review,
         "round_base": state.get("review_round", 0), "planning_exhausted": False, "blocked_by_budget": False,
         "continuation_generation": generation}, as_node="continuation_node")

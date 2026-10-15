@@ -6,6 +6,11 @@ from pydantic import BaseModel, Field
 class SubQuestion(BaseModel):
     objective: str = Field(min_length=1, max_length=1600)
     label: str = Field(default="", max_length=120)
+    # Optional defaults keep existing checkpoints readable. New model plans require these.
+    scope_keys: list[str] = Field(default_factory=list, max_length=12)
+    expected_output: str = Field(default="", max_length=1200)
+    covers: list[str] = Field(default_factory=list, max_length=12)
+    research_gap: str = Field(default="", max_length=1200)
 
 
 class ResearchTask(SubQuestion):

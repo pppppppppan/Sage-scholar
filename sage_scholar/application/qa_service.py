@@ -38,7 +38,7 @@ class QAService:
             conversation = bundle.messages()
         retrieval_query = request.query
         if request.history and re.search(
-            r"第[一二三四五六七八九十0-9]+个|前者|后者|它[们]?|这[两几]个|上述|刚才|之前|相比|"
+            r"第[一二三四五六七八九十0-9]+个|前者|后者|它[们]?|上(?:一)?篇|前一篇|这[两几]个|上述|刚才|之前|相比|"
             r"\b(?:former|latter|it|they|those|second|first)\b", request.query, re.I
         ):
             retrieval_query = await self._resolve_reference(request.query, conversation)

@@ -184,7 +184,7 @@ def test_research_source_reuses_recent_conversation_without_changing_evidence_pr
     _, source, _ = ResearchMemorySource(db, retrieval).load(run.run_id)
     assert source[0]['content'] == PROPOSAL and source[0]['extraction_eligible'] is False
     assert source[1]['content'] == CONFIRM and source[1]['extraction_eligible'] is True
-    assert source[2]['evidence_ids'] == [evidence.evidence_id] and source[2]['research_note_id'] == note['note_id']
+    assert source[2]['evidence_ids'] == [evidence.evidence_id] and source[2]['research_note_id'] == f"{run.run_id}:{note['task_id']}"
     db.close()
 
 

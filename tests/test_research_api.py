@@ -31,7 +31,8 @@ def test_research_api_citations_progress_and_partial(monkeypatch, tmp_path, libr
         def invoke(self, messages, tag, **kwargs):
             self.total_calls += 1
             if tag == "supervisor:plan":
-                result = {"questions": [{"label": "方法", "objective": "Read Method"}]}
+                result = {"requirements": ["Read Method"], "questions": [{"label": "方法", "objective": "Read Method",
+                    "scope_keys": ["paper:method"], "expected_output": "Describe the method", "covers": ["Read Method"]}]}
             elif tag.endswith(":react"):
                 if not any(message["role"] == "tool" for message in messages):
                     return ChatCompletionMessage(role="assistant", content=None, tool_calls=[{

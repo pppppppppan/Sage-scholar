@@ -128,21 +128,27 @@ class LLMClient:
         tool_choice=None,
         max_tokens: int = 4096,
         tag: str = "",
+        on_response=None,
     ) -> ChatCompletionMessage:
         from sage_scholar.runtime.control import check_control, CURRENT_CONTROL
         check_control()
+        from .model_limits import limits_for
+        limits = limits_for(self.model)
+        limits.validate_output(max_tokens)
         if self.context_manager is None:
             from sage_scholar.config import Config
             from sage_scholar.context.manager import ContextManager
             config = Config()
             self.context_manager = ContextManager(config.data_dir, max_tokens=config.context.max_tokens,
-                                                  reserve_ratio=config.context.reserve_ratio)
+                                                  reserve_ratio=config.context.reserve_ratio, recent_turns=config.context.recent_turns,
+                                                  history_tokens=config.context.history_tokens, report_tokens=config.context.report_tokens,
+                                                  agent_tokens=config.context.agent_tokens)
         if tool_choice is None:
             tool_choice = "auto" if tools else None
         prepared = self.context_manager.prepare(messages, tools=tools, tool_choice=tool_choice,
                                                  output_reserve=max_tokens, include_memory=not tag.startswith("memory:"),
                                                  summarize=self.summarize_history, purpose=tag,
-                                                 summary_mode=tag == "context:compress")
+                                                 summary_mode=tag == "context:compress", model_context_limit=limits.context)
         messages = prepared.messages
         logger.info("[Context:%s] %s", tag, prepared.accounting)
         control = CURRENT_CONTROL.get()
@@ -163,8 +169,12 @@ class LLMClient:
                     start = time.time()
                     response = client.chat.completions.create(**kwargs)
                     result = response.choices[0].message
+                    result.finish_reason = getattr(response.choices[0], "finish_reason", None)
                     self._track_usage(response.usage.prompt_tokens, response.usage.completion_tokens,
                         time.time() - start, tag, result, cached_tokens=cached_input(response.usage))
+            # Persist a completed ReAct response before honoring a concurrently requested Stop.
+            if on_response is not None:
+                on_response(result)
             check_control()
             return result
         except Exception as exc:
@@ -257,7 +267,7 @@ class LLMClient:
             response.usage.output_tokens,
             elapsed, tag, msg, cached_tokens=cache_read,
         )
-        return msg
+        return msg.model_copy(update={"finish_reason": "length" if response.stop_reason == "max_tokens" else response.stop_reason})
 
     @staticmethod
     def _translate_messages(messages):

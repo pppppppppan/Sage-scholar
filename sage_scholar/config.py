@@ -21,8 +21,28 @@ class LLMConfig:
 
 @dataclass
 class ContextConfig:
-    max_tokens: int = 30000
+    max_tokens: int = field(default_factory=lambda: int(os.getenv("CONTEXT_MAX_TOKENS", "30000")))
     reserve_ratio: float = 0.15
+    recent_turns: int = field(default_factory=lambda: int(os.getenv("CONTEXT_RECENT_TURNS", "6")))
+    history_tokens: int = field(default_factory=lambda: int(os.getenv("CONTEXT_HISTORY_TOKENS", "6000")))
+    report_tokens: int = field(default_factory=lambda: int(os.getenv("CONTEXT_REPORT_THRESHOLD", "2000")))
+    agent_tokens: dict = field(default_factory=lambda: {
+        name: int(os.getenv(f"CONTEXT_{name.upper()}_TOKENS", str(default))) for name, default in (
+            ("supervisor", 20000), ("researcher", 30000), ("review", 48000), ("writer", 64000))})
+
+
+@dataclass
+class GenerationConfig:
+    researcher_tokens: int = field(default_factory=lambda: int(os.getenv("RESEARCHER_MAX_OUTPUT_TOKENS", "4096")))
+    note_tokens: int = field(default_factory=lambda: int(os.getenv("RESEARCH_NOTE_MAX_OUTPUT_TOKENS", "4096")))
+    extended_note_tokens: int = field(default_factory=lambda: int(os.getenv("RESEARCH_NOTE_EXTENDED_OUTPUT_TOKENS", "6144")))
+    writer_tokens: int = field(default_factory=lambda: int(os.getenv("WRITER_MAX_OUTPUT_TOKENS", "16384")))
+
+    def __post_init__(self):
+        if min(self.researcher_tokens, self.note_tokens, self.writer_tokens) < 1:
+            raise ValueError("Agent 输出 token 上限必须大于零")
+        if self.extended_note_tokens < self.note_tokens:
+            raise ValueError("扩展笔记上限不能小于普通笔记上限")
 
 
 @dataclass
@@ -43,3 +63,4 @@ class Config:
     llm: LLMConfig = field(default_factory=LLMConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
     router: RouterConfig = field(default_factory=RouterConfig)
+    generation: GenerationConfig = field(default_factory=GenerationConfig)

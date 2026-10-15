@@ -5,8 +5,10 @@ from sage_scholar.research.references import reference_catalog, writer_material,
 
 
 class Writer:
-    def __init__(self, llm, *, evidence_context, temperature=0.3):
+    def __init__(self, llm, *, evidence_context, temperature=0.3, max_output_tokens=None):
+        from sage_scholar.config import GenerationConfig
         self.llm, self.context, self.temperature = llm, evidence_context, temperature
+        self.max_output_tokens = max_output_tokens or GenerationConfig().writer_tokens
 
     def run(self, request, notes, remaining_gaps=()):
         identities = list(dict.fromkeys(i for note in notes for i in note.source_ids))
@@ -15,6 +17,7 @@ class Writer:
         response = self.llm.invoke(messages=[
             {"role": "system", "content": (
                 "你是科研报告作者。直接读取全部研究笔记，围绕用户问题一次写出完整、连贯的 Markdown 调研报告。"
+                "根据用户要求决定篇幅，输出上限不是目标字数；简短问题应简短回答。"
                 "自行安排标题、章节及必要的对比表，不输出提纲或 JSON，不逐条拼接笔记，不重复介绍同一概念。"
                 "先回答核心问题，再解释原理、关键方法/公式、代表工作之间的关系和适用边界；按实际问题选择组织方式。"
                 "方法比较必须保留任务、数据、实验条件，不能把不同条件下的结果直接排名。"
@@ -26,11 +29,14 @@ class Writer:
             )},
             {"role": "user", "content": encoded({"brief": prompt_brief(request), "notes": materials,
                 "sources": sources, "remaining_gaps": list(remaining_gaps)})},
-        ], max_tokens=8192, temperature=self.temperature, tag="writer:report")
+        ], max_tokens=self.max_output_tokens, temperature=self.temperature, tag="writer:report")
         text = (response.content or "").strip()
         fence = chr(96) * 3
         if text.startswith(fence + "markdown") and text.endswith(fence):
             text = text[len(fence + "markdown"):-3].strip()
         if not text:
             raise ValueError("写作模型未返回报告正文，研究笔记已保存")
-        return finalize_report(text, references, self.context, remaining_gaps)
+        gaps = list(remaining_gaps)
+        if getattr(response, "finish_reason", None) == "length":
+            gaps.append("报告达到模型输出上限，正文可能未完整结束")
+        return finalize_report(text, references, self.context, gaps)

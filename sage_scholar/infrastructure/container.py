@@ -33,7 +33,9 @@ class ApplicationContainer:
         self.run_store.conversations.adopt_existing_runs()
         self.checkpoints = Checkpoints(self.config.data_dir)
         self.context_manager = ContextManager(self.config.data_dir, max_tokens=self.config.context.max_tokens,
-            reserve_ratio=self.config.context.reserve_ratio)
+            reserve_ratio=self.config.context.reserve_ratio, recent_turns=self.config.context.recent_turns,
+            history_tokens=self.config.context.history_tokens, report_tokens=self.config.context.report_tokens,
+            agent_tokens=self.config.context.agent_tokens)
         self.context_manager.run_store = self.run_store
         self.model_gateway = LegacyModelGateway(self.config)
         self.model_gateway.context_manager = self.context_manager

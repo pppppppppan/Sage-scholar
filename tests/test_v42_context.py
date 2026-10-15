@@ -171,9 +171,10 @@ def test_oversized_schema_and_hard_constraints_fail_instead_of_disappearing(tmp_
 
 
 @pytest.mark.parametrize("clarification", [False, True])
-def test_qa_followup_resolves_both_retrieval_and_answer_from_same_context(tmp_path, clarification):
+@pytest.mark.parametrize("query", ["第二个相比第一个有什么优势？", "它的实验条件呢？", "上一篇论文的方法有什么优势？"])
+def test_qa_followup_resolves_both_retrieval_and_answer_from_same_context(tmp_path, clarification, query):
     manager = ContextManager(tmp_path, max_tokens=9000)
-    req = request(query="第二个相比第一个有什么优势？", allow_web=False, source_scope=SourceScope.SELECTED_DOCUMENTS,
+    req = request(query=query, allow_web=False, source_scope=SourceScope.SELECTED_DOCUMENTS,
                   document_ids=("doc_A",), history=[
                       {"role": "user", "content": "这篇论文有哪两个核心模块？"},
                       {"role": "assistant", "content": "第一个是局部编码器，第二个是全局聚合器。"}])

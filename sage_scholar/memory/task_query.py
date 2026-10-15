@@ -26,4 +26,8 @@ def recall_query(request, messages, purpose=""):
     except (ValueError, TypeError):
         objectives.append(str(first)[:1200])
     dimensions.extend(str(v)[:150] for v in request.metadata.get("requested_dimensions", [])[:12])
-    return "\n".join(dict.fromkeys(v for v in [request.query[:2000], purpose, *objectives, *dimensions] if v))[:6000]
+    terms = [request.query[:2000], purpose, *objectives, *dimensions]
+    if purpose.endswith((":react", ":forced_summary")):
+        # Put the assigned subquestion first; avoid letting the global topic dominate recall.
+        terms = [*objectives, purpose, request.query[:600], *dimensions]
+    return "\n".join(dict.fromkeys(v for v in terms if v))[:6000]

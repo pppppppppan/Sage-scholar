@@ -70,7 +70,7 @@ ROUTER_CONFIDENCE_THRESHOLD=0.65
 - RunManager、SQLite、LangGraph checkpoint、HITL、取消、SSE、Context Manager 和 Memory 继续复用。笔记先落库再进入图的 checkpoint；恢复同一 Run 可复用已完成笔记与工具结果，显式继续只处理未完成问题和新补查。
 - 新 checkpoint schema 为 `research-supervisor-markdown-v2`。旧图的未完成 Run 需要重新开始，不能跨图结构续跑；历史报告、Evidence 和 Memory 不删除。新版 Run 仍可正常恢复。
 - Memory 从持久 Markdown 笔记抽取研究线索，保留 Run/Task、原句和有效 source IDs；不将研究线索升级为用户决策或 Citation Evidence。
-- 默认预算：60 万累计模型 token、15 万收尾预留、100 次工具调用、每子题 4 步、全 Run 最多 8 个子题、1 轮自动补查。单次上下文继续由 Context Manager 计量。相关环境变量沿用 `SAGE_DEEP_RESEARCH_*`。
+- 默认预算：60 万累计模型 token、15 万收尾预留、100 次工具调用、每子题最多 8 步、全 Run 最多 8 个子题、1 轮自动补查。单次上下文继续由 Context Manager 计量。相关环境变量沿用 `SAGE_DEEP_RESEARCH_*`。
 - 本轮只做语法、类型和少量无 API 冒烟验证，不代表真实模型的研究质量已验证。
 
 ## Long-term Memory Final Fix（2026-10-08）
@@ -97,7 +97,7 @@ ROUTER_CONFIDENCE_THRESHOLD=0.65
 
 ## V4.2：统一 Context 与 QA 连续追问（2026-10-02）
 
-- Context 采用当前指令/SourcePolicy/明确限制 + 最近两轮原始对话 + 较早历史结构化摘要 + Memory + 任务笔记/证据；不再把全部历史 user message 复制进 system。当前指令优先于旧限制与 Memory。
+- Context 采用当前指令/SourcePolicy/明确限制 + 优先最近六轮完整问答（按 token 预算动态收缩） + 较早历史结构化摘要 + Memory + 任务笔记/证据；不再把全部历史 user message 复制进 system。当前指令优先于旧限制与 Memory。
 - 旧历史按 token 分块，用同一个 LLMClient 增量汇总目标、先前结论、未解决问题和指代；摘要不作为科研事实。`data/context_summaries` 原子保存摘要，原对话保存在 `data/context_artifacts`，同一 Run 恢复时按内容指纹复用，不展开旧历史到 prompt。压缩失败明确降级为不完整原话摘录，不能假装完成语义摘要。
 - 模型调用前统一计入消息/工具 schema、SourcePolicy、Memory、ResearchNote/Evidence、框架开销及输出预留；日志包含分项估算。超限按工具外置、去重、整轮旧工具记录归档、历史摘要、旧过程摘录、证据窗口缩小依次处理，仍放不下明确报错，不静默删除限制。
 - 大工具结果保留 artifact/evidence ID、短摘录及定位；`read_context_artifact(identity, offset, limit)` 定向回读。Researcher 按问题回读证据，Writer 根据笔记汇总来源引用。原文窗口截断明确标记，不能假定未展示部分支持结论。
@@ -268,7 +268,7 @@ npm --prefix web run build
 - `/api/conversations` 管理对话；`POST /api/queries` 携带 `conversation_id` 和客户端 `request_id`。服务端读取真实历史，同一请求重试不会重复执行。一个对话同时执行一个任务，不同对话共用进程内执行槽位。
 - `POST /api/runs/{id}/cancel` 真正停止调度。MCP 取消指定调用；同步模型请求合作式取消，可能需要等当前网络调用超时，但不会继续派发后续调用。SSE 断开不取消 Run。
 - LangGraph 原生 interrupt 保存问题；Run 进入 `waiting_for_user`。`POST /api/runs/{id}/respond` 校验 conversation/run/interrupt ID，再使用 `Command(resume)` 继续。问题及回答持久化，重复或过期回答拒绝。
-- Deep Research 默认每个研究员 4 步，Run 最多 100 次工具调用、60 万模型 token、3600 秒活动执行时间；与单次 Context 窗口独立。可通过 `SAGE_DEEP_RESEARCH_MAX_TOOL_CALLS`、`SAGE_DEEP_RESEARCH_MAX_TOTAL_TOKENS`、`SAGE_DEEP_RESEARCH_MAX_SECONDS` 等配置，有硬上限。
+- Deep Research 默认每个研究员最多 8 步，Run 最多 100 次工具调用、60 万模型 token、3600 秒活动执行时间；与单次 Context 窗口独立。可通过 `SAGE_DEEP_RESEARCH_MAX_TOOL_CALLS`、`SAGE_DEEP_RESEARCH_MAX_TOTAL_TOKENS`、`SAGE_DEEP_RESEARCH_MAX_SECONDS` 等配置，有硬上限。
 - partial 的“继续研究”沿用 run ID、证据、已完成笔记和累计消耗，并在硬上限内追加执行预算。没有兼容 checkpoint 或存在未确认外部调用时，要求明确重新开始，不承诺 exactly-once。
 - 删除先留下对话 tombstone，再取消并等待关联 Run 收尾，删除消息、Run journal、事件和 checkpoint，取消未完成的记忆抽取。文献、Evidence 与已经保存的长期记忆属于科研工作区，保留并可单独管理。
 
@@ -296,6 +296,31 @@ python -m sage_scholar.mcp.check --server tavily
 
 - 提示词前缀保留稳定的指令、资料权限和预算配置；实时消耗不再注入 prompt，动态缺口和召回 Memory 放在后部。原有压缩、工具配对、来源回读与 Memory/Evidence 边界保持不变。
 - 同一研究员重复的成功工具调用复用结果；连续失败或重复无进展时结束该子任务。每个子题最多一次自动补查，每轮最多四个补查任务；没有新增证据/覆盖维度时停止重复研究，未解决项仍进入报告。
-- 默认从 60 万 Run token 中预留 15 万用于笔记、综合、报告和审查，可设置 `SAGE_DEEP_RESEARCH_REPORT_RESERVE_TOKENS=150000`（最多占总预算一半）。这是收集阶段的停止边界，不能保证所有规模的报告都能完成；硬上限仍生效。
+- 默认从 60 万 Run token 中预留 15 万用于笔记、Supervisor Review 和报告，可设置 `SAGE_DEEP_RESEARCH_REPORT_RESERVE_TOKENS=150000`（最多占总预算一半）。这是收集阶段的停止边界，不能保证所有规模的报告都能完成；硬上限仍生效。
 - Run 卡片显示服务商实际返回的输入缓存命中率；未上报的调用不计入分母。日志中的 `input_cache=unreported` 表示未知，不能当作零命中。缓存输入仍计入累计 token，缓存主要降低输入费用/延迟，实际命中率取决于服务商与请求前缀。
 - 重启后新建一次调研，观察累计 token、输入缓存和剩余缺口。旧 Run 的历史消耗不会清零；旧调用没有缓存指标，无法补算。
+
+
+## Agent 上下文与 ReAct 恢复（2026-10-15）
+
+研究主链保持 `Supervisor → 并行 Researcher → Supervisor Review → 整篇 Writer`。
+
+- 新 Run 的 Researcher 最多 8 次 ReAct 模型调用，可提前产出笔记；工具调用总数、时间、全 Run 60 万 token 和 15 万收尾预留不变。已有 Run 恢复继续遵守其持久化预算，不偷偷重置消费或扩大限制。
+- Researcher 单次输出 4096 token，收尾笔记 4096；仅在模型明确返回 `finish_reason=length` 时允许一次 6144 的扩展笔记尝试。仍截断则标为不完整。Writer 整篇报告上限 16384，篇幅由问题决定；截断不会当作完整报告。
+- `_history → _build_messages → LLMClient.invoke → ContextManager.prepare → provider`：provider 收到的是 `prepare.messages`，不是原始历史。完整计量包括指令、工具 schema、历史、Memory、研究材料和输出预留。单次预算与累计 Run 消耗分开。
+- Supervisor 使用相关历史摘要；Researcher 使用自己的子问题和私有 ReAct；Review/Writer 使用全部笔记及任务/来源材料，不重复注入 Conversation 全文。明确用户限制和 SourcePolicy 在各调用中保留。Memory 按任务召回精简视图；Review 不额外注入 Memory。
+- 普通连续问答优先保留最近 6 轮完整问答（当前问题不计入历史），按剩余预算逐轮缩小窗口。超过 2000 token 的历史长回答用摘要和 artifact 引用代替。摘要在同一 workspace/conversation 内缓存复用；原始 Conversation 记录不变。
+- SQLite 现有 results 表增加 `react:{task_id}:{revision}` 记录，由 run_id 隔离。每次已完成的模型响应、每个工具结果分别提交；保存私有消息、来源 ID、步数和必要计数，不保存完整组装后的 prompt。大工具原文外置为 artifact，Evidence 原文仍由 EvidenceStore 管理。
+- LangGraph 继续负责工作流 checkpoint；恢复原节点时读取 ReAct 记录，补全未完成的工具批次，复用 Tool Journal 已提交结果，再继续模型步骤。模型响应在响应后取消检查前提交。模型异常保留原任务 revision；已完成其他 ResearchNote 不重跑。`deepcopy` 只压缩发送副本，不改变用于恢复的规范消息记录。
+- 不承诺 exactly-once：进程若在远端返回、但本地提交前被杀，仍可能重复该次模型调用；工具未知状态沿用现有安全重试/人工处理规则。旧 Run 在本次升级前未保存的 ReAct 步骤无法补建。大规模笔记仍可能触及单次预算，不能用更高输出限额保证无限深度。
+
+配置见 `.env.example`。Agent 工作窗口分别默认 20000/30000/48000/64000（Supervisor/Researcher/Review/Writer，包含输出预留），不表示必须花满。未知或自定义代理模型使用长输出前需核对服务商并配置 `LLM_MAX_OUTPUT_TOKENS` 和 `LLM_CONTEXT_WINDOW`；超限会在请求前拒绝。当前 DeepSeek 官方模型上限参考 [模型价格与能力](https://api-docs.deepseek.com/quick_start/pricing/) 和 [Chat API](https://api-docs.deepseek.com/api/create-chat-completion/)，自定义网关可能更低。
+
+## Supervisor 最小充分拆分（2026-10-15）
+
+- 默认先考虑一个 Researcher 是否足够，通常 1–4 个互补子问题；复杂任务可更多，仍受 Run 总任务数约束。没有固定关键词数量规则、补足任务数量的循环或额外去重 Agent。
+- Supervisor 在原有一次规划内识别用户目标 `requirements`，为每题输出自包含 `objective`、预期产出 `expected_output`、规范化研究范围 `scope_keys` 和覆盖目标 `covers`。语义等价的成果使用相同范围标识；不能仅按论文相同认定任务重复。
+- 代码合并同范围/完全相同的问题，保留各目标、产出和范围标识；合并后校验所有声明目标仍被覆盖。任务名额不足时合并溢出项，不直接截掉用户要求。字段不能无损容纳的异常方案会拒绝，不伪造覆盖成功。
+- Review 优先判断全部笔记是否已能回答问题。新增补查须说明具体 `research_gap`、新研究目标与预期成果；仅仅要求更详细不会自动派任务。已完成/部分完成/待执行的相同范围会过滤，包含新增目标的部分交叉仍保留；被过滤任务声明的真实缺口不会被假装解决，而是留给 Writer 披露。
+- 显式“继续研究”不再把 remaining_gaps 字符串直接变成任务，没有已审定补充任务时先进入 Supervisor Review。原有轮次、总任务量、工具及 token 预算、Send 并行派发和 ResearchNote 汇总保持不变。
+- 新字段随 ResearchTask checkpoint 持久化；旧 checkpoint 缺少字段时使用空默认值。语义判断仍由同一次 Supervisor 调用负责，代码核验标识与覆盖关系，不声称字符串算法能够独立证明语义等价；测试使用固定模型输出，不替代真实模型效果验收。

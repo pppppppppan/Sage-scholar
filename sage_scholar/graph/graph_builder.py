@@ -9,6 +9,7 @@ from sage_scholar.context.manager import ContextBudgetExceeded
 from sage_scholar.context.manager import request_context
 from sage_scholar.runtime.journal import WorkflowInterrupted
 from sage_scholar.runtime.control import CURRENT_CONTROL, ResearchBudgetReached, check_control
+from sage_scholar.research.planning import consolidate, within_budget, novel_followups, prune_review, compact_gaps
 from sage_scholar.domain.execution import ExecutionRequest
 from sage_scholar.domain.research import ResearchNote, ResearchReport, ResearchTask, SupervisorReview
 
@@ -85,16 +86,16 @@ def build_graph(supervisor, create_researcher, writer, *, budget=None, checkpoin
     def plan_node(state):
         request, previous = state["execution"], state.get("tasks", {})
         questions = (state["supervisor_review"].follow_up_questions if previous else supervisor.plan(request))
-        seen = {t.objective.strip().casefold() for t in previous.values()}
         available = max(0, request.budget["max_tasks"] - len(previous))
+        questions = (novel_followups(questions, list(previous.values())) if previous else consolidate(questions))
+        questions = within_budget(questions, available)
         tasks = {}
         for question in questions:
             objective = question.objective.strip()
-            if not objective or objective.casefold() in seen or len(tasks) >= available:
+            if not objective:
                 continue
             identity = f"T{len(previous) + len(tasks) + 1}"
-            tasks[identity] = ResearchTask(task_id=identity, objective=objective, label=question.label)
-            seen.add(objective.casefold())
+            tasks[identity] = ResearchTask(task_id=identity, **{**question.model_dump(), "objective": objective})
         if not tasks and not previous:
             raise ValueError("未形成有效研究子问题，请重试")
         return {"tasks": tasks, "planning_exhausted": not tasks}
@@ -140,6 +141,7 @@ def build_graph(supervisor, create_researcher, writer, *, budget=None, checkpoin
         except Exception:
             logger.exception("Supervisor review failed; preserve notes for writing")
             review = SupervisorReview(remaining_gaps=["研究主管未能完成覆盖审查，报告范围仍需确认"])
+        review = prune_review(review, tasks)
         # Failed collection is visible, but ordinary literature limitations never automatically become backlog.
         for task in tasks:
             if task.status in {"failed", "blocked"}:
@@ -147,7 +149,7 @@ def build_graph(supervisor, create_researcher, writer, *, budget=None, checkpoin
         for question in review.follow_up_questions:
             if question.objective not in review.remaining_gaps:
                 review.remaining_gaps.append(question.objective)
-        review.remaining_gaps = list(dict.fromkeys(review.remaining_gaps))
+        review.remaining_gaps = compact_gaps(review.remaining_gaps)
         blocked = bool(review.follow_up_questions and exhausted())
         if blocked and budget:
             budget.mark_blocked()

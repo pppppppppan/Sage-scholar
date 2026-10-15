@@ -21,6 +21,7 @@ from sage_scholar.domain.execution import ExecutionRequest
 from sage_scholar.runtime.limits import execution_budget
 from sage_scholar.infrastructure.json_store import write_json
 from .budget import ResearchBudget, BudgetedTool
+from .progress import ResearchProgress
 from .evidence_context import ResearchEvidenceContext
 from sage_scholar.infrastructure.retrieval import LegacyRetrievalAdapter
 from sage_scholar.tools.policy import EvidenceTool
@@ -158,7 +159,7 @@ class ResearchRuntime:
         )
         writer = Writer(
             llm=self.llm_client, evidence_context=context,
-            temperature=self.config.llm.writer_temperature,
+            temperature=self.config.llm.writer_temperature, max_output_tokens=self.config.generation.writer_tokens,
         )
 
         def build_researcher(task_id, revision=0):
@@ -167,7 +168,8 @@ class ResearchRuntime:
                 name=task_id, llm=self.llm_client,
                 tool_list=make_tools(f"{task_id}:{revision}", observed_ids),
                 max_steps=request.budget["max_steps"], temperature=self.config.llm.research_temperature,
-                evidence_context=context, observed_ids=lambda: sorted(observed_ids),
+                evidence_context=context, observed_ids=lambda: sorted(observed_ids), generation=self.config.generation,
+                progress=ResearchProgress(self.store, request.run_id, task_id, revision) if durable else None,
             )
 
         def create_researcher(task_id):
