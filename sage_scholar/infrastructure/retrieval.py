@@ -23,6 +23,8 @@ class LegacyRetrievalAdapter:
         self._lock = threading.Lock()
         self.documents = documents or JsonDocumentStore(config.data_dir)
         self.evidence_store = evidence_store or JsonEvidenceStore(config.data_dir)
+        from sage_scholar.visual.service import VisualService
+        self.visual = VisualService(config.data_dir, self.documents, self.evidence_store)
 
     @property
     def pipeline(self) -> Pipeline:
@@ -43,9 +45,12 @@ class LegacyRetrievalAdapter:
         return await cooperative_thread(self.retrieve_sync, query, policy, top_k)
 
     def retrieve_sync(self, query: str, policy: SourcePolicy, top_k: int = 5) -> list[EvidenceRef]:
+        return self.retrieve_with_warnings(query, policy, top_k)[0]
+
+    def retrieve_with_warnings(self, query, policy, top_k=5):
         docs = {doc.converted_path: doc for doc in self.permitted_documents(policy)}
         if not docs:
-            return []
+            return [], []
         # Restrict candidates before BM25/vector scoring, then defensively validate returned paths.
         results = self.pipeline.retrieve_chunks(query, top_k=top_k, allowed_file_paths=set(docs))
         evidence = []
@@ -63,7 +68,11 @@ class LegacyRetrievalAdapter:
             ]
             if len(matching) == 1 and matching[0].original_text != chunk.content:
                 evidence.append(matching[0])
-        return list({item.evidence_id: item for item in evidence}.values())
+        text = list({item.evidence_id: item for item in evidence}.values())
+        images, warnings = self.visual.search(query, list(docs.values()), self.visual.config.max_images)
+        # Different encoders have incomparable cosine scores. Fuse ranks, not vectors/scores.
+        from sage_scholar.visual.fusion import fuse
+        return fuse(text, images, top_k + self.visual.config.max_images), warnings
 
     async def read_documents(self, *, policy: SourcePolicy) -> list[EvidenceRef]:
         return await cooperative_thread(self.read_documents_sync, policy)

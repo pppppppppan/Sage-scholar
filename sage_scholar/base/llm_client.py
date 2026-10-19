@@ -129,12 +129,26 @@ class LLMClient:
         max_tokens: int = 4096,
         tag: str = "",
         on_response=None,
+        images=None,
     ) -> ChatCompletionMessage:
         from sage_scholar.runtime.control import check_control, CURRENT_CONTROL
         check_control()
         from .model_limits import limits_for
         limits = limits_for(self.model)
         limits.validate_output(max_tokens)
+        image_tokens = 0
+        if images:
+            from sage_scholar.visual.config import VisualConfig
+            from sage_scholar.visual.transport import image_labels
+            visual_config = VisualConfig()
+            if self._is_claude or limits.context is None:
+                raise ValueError("图片调用需要支持 OpenAI 图像格式的视觉模型，并配置已知的 LLM_CONTEXT_WINDOW")
+            if len(images) > visual_config.max_images:
+                raise ValueError("本次图片数量超过 VISION_MAX_IMAGES")
+            image_tokens = len(images) * visual_config.tokens_per_image
+            if image_tokens + max_tokens >= limits.context:
+                raise ValueError("图片与输出预留超过模型上下文上限")
+            messages = [*messages, {"role": "user", "content": image_labels(images)}]
         if self.context_manager is None:
             from sage_scholar.config import Config
             from sage_scholar.context.manager import ContextManager
@@ -148,21 +162,30 @@ class LLMClient:
         prepared = self.context_manager.prepare(messages, tools=tools, tool_choice=tool_choice,
                                                  output_reserve=max_tokens, include_memory=not tag.startswith("memory:"),
                                                  summarize=self.summarize_history, purpose=tag,
-                                                 summary_mode=tag == "context:compress", model_context_limit=limits.context)
+                                                 summary_mode=tag == "context:compress",
+                                                 model_context_limit=limits.context - image_tokens if limits.context else None)
         messages = prepared.messages
+        if images:
+            from sage_scholar.visual.transport import attach_images
+            if prepared.accounting["total_tokens"] + image_tokens > limits.context:
+                raise ValueError("文字、图片估算与输出预留合计超过模型 Context Window")
+            messages = attach_images(messages, images)
         logger.info("[Context:%s] %s", tag, prepared.accounting)
         control = CURRENT_CONTROL.get()
         lease = control.reserve_model(prepared.accounting["total_tokens"], purpose=tag) if control else None
         started = time.monotonic()
         try:
             check_control()
+            if images and control and control.store:
+                if not control.store.reserve_images(control.request.run_id, image_tokens, len(images), visual_config.run_tokens):
+                    raise ValueError("本次 Run 的独立读图预算已耗尽；可继续使用已有文字与图像解读")
             if self._is_claude:
                 result = self._invoke_claude(messages, temperature, tools, tool_choice, max_tokens, tag)
             else:
                 client = self.client.with_options(max_retries=0) if control else self.client
                 kwargs = dict(messages=messages, model=self.model, temperature=temperature,
                     max_tokens=max_tokens, tool_choice=tool_choice, tools=tools if tools else None, extra_body=self.extra_body)
-                if control and control.emit and not tools and tag in {"direct", "qa"}:
+                if control and control.emit and not tools and not images and tag in {"direct", "qa"}:
                     from sage_scholar.runtime.streaming import openai_text
                     result = openai_text(client, kwargs, control, self._track_usage, tag)
                 else:
@@ -171,7 +194,8 @@ class LLMClient:
                     result = response.choices[0].message
                     result.finish_reason = getattr(response.choices[0], "finish_reason", None)
                     self._track_usage(response.usage.prompt_tokens, response.usage.completion_tokens,
-                        time.time() - start, tag, result, cached_tokens=cached_input(response.usage))
+                        time.time() - start, tag, result, cached_tokens=cached_input(response.usage),
+                        image_tokens_estimated=min(image_tokens, max(0, response.usage.prompt_tokens - prepared.accounting["input_tokens"])))
             # Persist a completed ReAct response before honoring a concurrently requested Stop.
             if on_response is not None:
                 on_response(result)
@@ -325,7 +349,7 @@ class LLMClient:
 
     # ---- shared ----
 
-    def _track_usage(self, prompt_tokens, completion_tokens, elapsed, tag, msg, cached_tokens=None):
+    def _track_usage(self, prompt_tokens, completion_tokens, elapsed, tag, msg, cached_tokens=None, image_tokens_estimated=0):
         from sage_scholar.runtime.metrics import model_stage, record_stage
         record_stage(model_stage(tag), prompt=prompt_tokens, completion=completion_tokens,
                      cached=cached_tokens, seconds=elapsed)
@@ -336,7 +360,10 @@ class LLMClient:
         request = CURRENT_REQUEST.get()
         ledger = getattr(self.context_manager, "run_store", None)
         if ledger and request and request.run_id:
-            if cached_tokens is None:
+            if image_tokens_estimated:
+                ledger.record_usage(request.run_id, prompt_tokens, completion_tokens,
+                                    cached_tokens=cached_tokens, image_tokens_estimated=image_tokens_estimated)
+            elif cached_tokens is None:
                 ledger.record_usage(request.run_id, prompt_tokens, completion_tokens)
             else:
                 ledger.record_usage(request.run_id, prompt_tokens, completion_tokens, cached_tokens=cached_tokens)

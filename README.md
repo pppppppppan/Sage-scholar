@@ -1,5 +1,59 @@
 # SAGE Scholar
 
+## PDF 图片 RAG
+
+在原文本 RAG 上增加独立的视觉索引：PDF → Docling 图表区域识别 / PyMuPDF 页面渲染 → 本地 Qwen3-VL-Embedding-2B → 图文两路检索 → RRF 排名融合 → DeepSeek 按需读原图。原有文本 embedding、BM25 和 reranker 不换模型、不清库；不同模型的向量不混算相似度。
+
+上传 PDF 的文字解析仍复用现有 pdfmux MCP；视觉部分在文字入库后补充构建，并未替换这项依赖。当前不支持绕过失败的文字解析、直接把纯图扫描 PDF 当成上传成功。
+
+### 启用
+
+在原来的 Python 环境运行：
+
+```bash
+cd /Users/pan/Desktop/1/sage-scholar
+conda activate deep-research
+python -m pip install -r requirements-visual.txt
+hf download Qwen/Qwen3-VL-Embedding-2B
+```
+
+将 `.env.example` 的 PDF / VISION 配置段补到自己的 `.env`，不要覆盖已有密钥。默认 `VISUAL_EMBEDDING_LOCAL_ONLY=true`：需要先下载权重，不会在提问时自动下载大模型。视觉 embedding 默认 CPU、每批一张；可在本机确认兼容性后设置 `VISUAL_EMBEDDING_DEVICE=mps`。它与 Router 的 Ollama 模型无关，也不是文本 embedding 模型。
+
+`PDF_VISUAL_PARSER=docling` 使用 Docling 的布局模型，首次运行可能下载它自己的模型。会保留每页渲染图，并额外裁剪识别出的 figure/table，包含图注、页码和坐标；矢量图也通过页面渲染保留。Docling 未安装时明确降级到整页视觉检索。`PDF_VISUAL_PARSER=page` 可以主动使用整页方式，不提供区域识别或 OCR。旋转/坐标无法可靠对应的页面只保留整页，不猜测裁剪位置。
+
+视觉生成默认 `VISION_MODEL_ID=deepseek-flash`，复用 `DEEPSEEK_BASE_URL` 和 `DEEPSEEK_API_KEY`。自定义网关必须实际支持该模型的 `image_url` 输入；模型名称需按网关配置，并核对 `LLM_CONTEXT_WINDOW`。视觉 embedding 本地计算不产生 API 费用，**DeepSeek 读图仍按 API 用量收费**。本功能未改变 Direct、Router 的模型。
+
+重启服务后，新上传 PDF 会建立图片索引；旧 PDF 不会自动重跑，可在文献库点击“重建图片索引”，或者：
+
+```bash
+python -m sage_scholar.visual --all
+# 只重建某一篇：
+python -m sage_scholar.visual --document doc_xxx
+```
+
+重建只更新视觉索引，不重算文本向量。命令没有调用付费视觉生成 API。若未保留旧 PDF 原文件，需要重新上传。首次索引速度取决于页数和硬件；长文献建议使用上述 CLI，避免浏览器代理超时。图片依赖/权重缺失时，文本上传和检索仍可使用，文献库显示图片未就绪及原因。
+
+### 检索、读图和来源
+
+- 文本问题继续通过原检索链获取文本；同时用同一个视觉 embedding 模型编码当前问题、检索 PDF 页面/图表，按排名融合。图号/页码只辅助定位，不替代语义检索。
+- QA 最多读取 `VISION_MAX_IMAGES=3` 张相关原图；概览仍读取原有文字章节，额外检索相关图片，不声称检查全部图表。
+- Research 的 `rag_search` 返回图像 Evidence 来源，`read_pdf_visual` 按问题读取其真实像素。返回值明确标为模型解读，不冒充逐字原文。沿用已有工具 journal、取消、预算与 Evidence 权限检查。
+- 图片按 PDF 版本保存到转换目录的 `visual/`，索引记录模型/revision、解析器、PDF hash、图像 hash、页码和 bbox。换模型/revision须重建；旧图片文件保留供历史 Evidence 回读。删除文献后禁止继续从图片接口读取该文献。
+- QA 的 Evidence 展开区可看原图，Research 参考文献附原图链接。`GET /api/evidence/{id}/image` 只解析已登记的来源，不接受客户端文件路径。
+- Base64 只在最终模型请求处生成，不进入 Conversation、Memory 或 Context history；文本 Context Manager 处理图像来源清单和文字内容。原图是 Evidence；视觉解读是观察，不自动写入原文或长期记忆。
+
+### 图片预算与边界
+
+`VISION_TOKENS_PER_IMAGE=1024` 是保守配置估算，`VISION_RUN_IMAGE_TOKENS=60000` 是独立的累计图片预算。读图次数和估算消耗持久化到现有 SQLite，恢复不会清零；失败/未知执行状态也按尝试保守扣减。文本输入和视觉回答输出继续受原 Run 预算约束。
+
+提供商通常报告混合 prompt 总量，不能据此精确拆出图片费用：累计 token 仍展示提供商原值；文字预算只减去受本地文字估算约束的图片估算部分，图片卡片明确标为估算。文字 + 图片估算 + 输出预留仍须满足模型总上下文上限。估算不等于账单，需根据所用网关校准；这不能绕开提供商的真实上下文限制。
+
+此实现是单向量本地视觉检索，没有新增多模态 reranker；召回/小字识别质量取决于模型、页面分辨率与图表复杂度。没有承诺精确读取所有表格数字。用“解释这篇论文图 2 的曲线与实验结论”“比较表 1 的各方法结果”做真实验收，并核对返回的原图和页码。
+
+实现依据：[Qwen 对齐图文 embedding](https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B)、[Docling 文档结构与位置](https://docling-project.github.io/docling/reference/docling_document/)、[DeepSeek 图像输入](https://api-docs.deepseek.com/guides/vision/)、[Azure 多模态检索](https://learn.microsoft.com/en-us/azure/search/multimodal-search-overview)。
+
+---
+
 SAGE Scholar 是基于 SAGE Research 重构的单进程科研 Agent 应用。所有新查询先创建持久 Run，再进入统一 LangGraph；本机轻量模型负责语义分类，条件边进入 Direct、文档 QA、Clarify 或现有 Deep Research 子图。RunManager 管理生命周期、预算和 SSE，LangGraph 管理 workflow 状态。
 
 ```mermaid

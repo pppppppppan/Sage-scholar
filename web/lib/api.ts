@@ -98,6 +98,8 @@ export interface SaveReportResult {
 }
 
 export interface LibraryDoc {
+  visual?: { status: "ready" | "failed" | "disabled"; elements?: number; warning?: string | null };
+  original_path?: string | null;
   active_version?: string | null;
   document_id: string;
   document_version: string;
@@ -119,6 +121,10 @@ export async function saveReport(title: string, content: string): Promise<SaveRe
 export async function listDocs(): Promise<LibraryDoc[]> {
   const response = await fetch(`${API_BASE}/api/library`);
   return expectJson<LibraryDoc[]>(response);
+}
+
+export async function rebuildVisualIndex(documentId: string): Promise<NonNullable<LibraryDoc["visual"]>> {
+  return expectJson(await fetch(`${API_BASE}/api/library/${encodeURIComponent(documentId)}/visual-index`, { method: "POST" }));
 }
 
 export async function deleteDoc(documentId: string): Promise<void> {

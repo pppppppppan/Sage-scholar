@@ -8,6 +8,15 @@ from ..schemas import IngestRequest, IngestResult, SaveReportRequest
 
 router = APIRouter()
 
+
+@router.post("/api/library/{document_id}/visual-index")
+async def rebuild_visual_index(document_id: str, container: Container):
+    from sage_scholar.runtime.control import cooperative_thread
+    try:
+        return await cooperative_thread(container.retrieval.visual.rebuild, document_id)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+
 @router.get("/api/library")
 async def list_documents(container: Container):
     return await container.document_service.list_documents()

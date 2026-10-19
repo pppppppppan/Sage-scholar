@@ -15,11 +15,12 @@ from .converter import convert_to_markdown
 class LibraryManager:
     """Serialize ingestion independently of short catalog reads/writes."""
 
-    def __init__(self, data_dir, paper_tool, pdfmux_tool, pipeline):
+    def __init__(self, data_dir, paper_tool, pdfmux_tool, pipeline, visual=None):
         self.data_dir = data_dir
         self.paper_tool = paper_tool
         self.pdfmux_tool = pdfmux_tool
         self.pipeline = pipeline
+        self.visual = visual
         self.store = JsonDocumentStore(data_dir)
         self.ingestion_lock = file_lock(Path(data_dir) / ".ingestion")
 
@@ -100,6 +101,8 @@ class LibraryManager:
             current.original_path = version.original_path
             current.converted_path = new_path
             current.metadata.update(source_type=converted.source_type, arxiv_id=converted.arxiv_id)
+            if self.visual and original and original.suffix.lower() == ".pdf" and save_original:
+                current.metadata["visual"] = self.visual.build(original, new_path)
             self._status(current, IngestionStatus.READY)
             committed = True
             return self._result(current, "overwritten" if existing else "created")

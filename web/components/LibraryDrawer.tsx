@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { listDocs, deleteDoc, uploadFile, type LibraryDoc } from "@/lib/api";
+import { listDocs, deleteDoc, uploadFile, rebuildVisualIndex, type LibraryDoc } from "@/lib/api";
 
 export default function LibraryDrawer({ selectedDocuments, onSelectionChange }: {
   selectedDocuments: LibraryDoc[];
@@ -15,6 +15,7 @@ export default function LibraryDrawer({ selectedDocuments, onSelectionChange }: 
   const [removing, setRemoving] = useState<string | null>(null);
   const [entering, setEntering] = useState<Set<string>>(new Set());
   const [uploading, setUploading] = useState(false);
+  const [rebuilding, setRebuilding] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -91,11 +92,26 @@ export default function LibraryDrawer({ selectedDocuments, onSelectionChange }: 
           });
         });
       }
+      setDocs(await listDocs());
     } catch (err) {
       setError(err instanceof Error ? err.message : "上传失败，请重试");
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  async function handleRebuild(documentId: string) {
+    setRebuilding(documentId);
+    setError(null);
+    try {
+      const result = await rebuildVisualIndex(documentId);
+      setDocs(await listDocs());
+      if (result.status !== "ready") setError(result.warning || "图片索引未启用");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "图片索引失败");
+    } finally {
+      setRebuilding(null);
     }
   }
 
@@ -170,7 +186,7 @@ export default function LibraryDrawer({ selectedDocuments, onSelectionChange }: 
                 style={{
                   opacity: isRemoving || isEntering ? 0 : 1,
                   transform: isRemoving ? "translateX(-20px)" : isEntering ? "translateX(20px)" : "translateX(0)",
-                  maxHeight: isRemoving ? 0 : 120,
+                  maxHeight: isRemoving ? 0 : 300,
                   overflow: "hidden",
                 }}
               >
@@ -193,6 +209,16 @@ export default function LibraryDrawer({ selectedDocuments, onSelectionChange }: 
                     {" · "}
                     {new Date(doc.added_at).toLocaleDateString("zh-CN")}
                   </p>
+                  {(doc.visual || doc.original_path?.toLowerCase().endsWith(".pdf")) && (
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      <p>{doc.visual?.status === "ready" ? `图片可检索 · ${doc.visual.elements} 个页面/图表` : "图片未建索引 · 文字仍可检索"}</p>
+                      {doc.visual?.warning && <p className="mt-1">{doc.visual.warning}</p>}
+                      <button disabled={rebuilding !== null || uploading} onClick={() => handleRebuild(doc.document_id)}
+                        className="mt-1 underline disabled:opacity-50">
+                        {rebuilding === doc.document_id ? "正在解析并建立图片索引…" : "重建图片索引"}
+                      </button>
+                    </div>
+                  )}
                   <div className="absolute right-0 top-2 w-10 flex justify-center">
                     {/* Trash icon */}
                     <button

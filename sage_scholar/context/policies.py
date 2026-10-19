@@ -10,6 +10,8 @@ class ContextPolicy:
 
 
 def policy_for(purpose):
+    if purpose == "researcher:visual":
+        return ContextPolicy("researcher", "none", 0)
     if purpose == "supervisor:review":
         return ContextPolicy("review", "none", 0)
     if purpose.startswith("supervisor:") or purpose == "interaction:assess":

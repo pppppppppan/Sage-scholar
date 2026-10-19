@@ -14,6 +14,7 @@ class LegacyModelGateway:
         self._config = config
         self.context_manager = context_manager
         self._client: LLMClient | None = None
+        self._vision_client: LLMClient | None = None
         self._lock = threading.Lock()
 
     @property
@@ -31,20 +32,31 @@ class LegacyModelGateway:
     def summarize_history(self, previous, batch, budget):
         return self.client.summarize_history(previous, batch, budget)
 
+    @property
+    def vision_client(self):
+        from sage_scholar.visual.config import VisualConfig
+        with self._lock:
+            if self._vision_client is None:
+                self._vision_client = LLMClient(model=VisualConfig().model,
+                    timeout=self._config.llm.timeout, context_manager=self.context_manager)
+        return self._vision_client
+
     async def complete(
         self,
         messages: list[dict[str, str]],
         *,
         temperature: float = 0,
         tag: str = "",
+        images=None,
     ) -> str:
         response = await cooperative_thread(
-            self.client.invoke,
+            (self.vision_client if images else self.client).invoke,
             messages,
             temperature,
             None,
             None,
             4096,
             tag,
+            **({"images": images} if images else {}),
         )
         return response.content or ""

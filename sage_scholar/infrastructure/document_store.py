@@ -79,4 +79,5 @@ class JsonDocumentStore:
             "added_at": doc.created_at.isoformat(),
             "source_type": doc.metadata.get("source_type", "unknown"),
             "arxiv_id": doc.metadata.get("arxiv_id"),
+            "visual": doc.metadata.get("visual"),
         }

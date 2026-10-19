@@ -1,0 +1,6 @@
+# Optional PDF visual retrieval; install alongside requirements.txt.
+PyMuPDF>=1.26,<2
+Pillow>=11,<14
+docling>=2.60,<3
+sentence-transformers>=5.7,<6
+transformers>=5.2,<6

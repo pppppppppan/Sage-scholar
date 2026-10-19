@@ -46,6 +46,7 @@ export default function RunCard({ run: saved, refresh, archived = false }: { run
       <span>{runLabels[saved.status]}</span><span>{saved.workflow}</span>
       {!!saved.consumed_budget.tool_calls && <span>工具 {saved.consumed_budget.tool_calls} 次</span>}
       {!!saved.consumed_budget.prompt_tokens && <span>累计 token {(saved.consumed_budget.prompt_tokens || 0) + (saved.consumed_budget.completion_tokens || 0)}</span>}
+      {!!saved.consumed_budget.image_count && <span title="图片单独限制；此处为调用前估算，累计 token 仍是提供商报告的总量。失败或中断的读图尝试也保守计入图片预算。">读图 {saved.consumed_budget.image_count} 张 · 图片预算已计 {saved.consumed_budget.image_budget_tokens} tokens（估算）</span>}
       {saved.consumed_budget.cache_observed_input_tokens > 0 && <span title="仅统计提供商返回缓存字段的请求，命中的输入仍计入 Run token 上限">
         输入缓存 {(100 * saved.consumed_budget.cached_input_tokens / saved.consumed_budget.cache_observed_input_tokens).toFixed(1)}%
       </span>}

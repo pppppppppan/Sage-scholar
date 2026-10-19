@@ -14,6 +14,7 @@ class ModelGateway(Protocol):
         *,
         temperature: float = 0,
         tag: str = "",
+        images: list[dict] | None = None,
     ) -> str: ...
 
 

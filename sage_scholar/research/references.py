@@ -89,6 +89,10 @@ def finalize_report(text, mapping, context, gaps=()):
         source = source.replace("(", "%28").replace(")", "%29").replace(" ", "%20")
         location = re.sub(r"[\n\r<>\[\]]", " ", item.section or (f"第 {item.page} 页" if item.page else ""))
         refs.append(f"[{renumber[old]}] [{source_label(item)}]({source})" + (f" · {location}" if location else ""))
+        for visual_id in dict.fromkeys(citation_evidence[renumber[old]]):
+            visual = context.get(visual_id)
+            if visual.metadata.get("kind") == "visual_source":
+                refs[-1] += f" · [原图 p.{visual.page}](/api/evidence/{visual_id}/image)"
     remaining = list(dict.fromkeys(remaining))
     notice = "\n\n> 阶段性报告：仍有未覆盖或待确认内容，具体缺口见任务状态。" if remaining else ""
     report = text + notice

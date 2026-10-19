@@ -44,6 +44,8 @@ class ResearchRuntime:
         self.store, self.checkpoints, self.context_manager = store, checkpoints, context_manager
         self.llm_client = llm_client or LLMClient(model=config.llm.model, timeout=config.llm.timeout, context_manager=context_manager)
         self.retrieval = retrieval or LegacyRetrievalAdapter(config, pipeline=pipeline)
+        from sage_scholar.infrastructure.model_gateway import LegacyModelGateway
+        self.visual_gateway = LegacyModelGateway(config, context_manager)
         self.mcp_clients = []
         self.registry = ToolRegistry()
         self.paper_reader = self.pdfmux_tool = None
@@ -131,9 +133,13 @@ class ResearchRuntime:
                     tool = JournaledTool(tool, self.store, request.run_id, task_id, cancelled, replay)
                 return tool
 
+            from sage_scholar.tools.tool_pdf_visual import PDFVisualTool
+            local_tools = [RAGTool(self.retrieval, policy, record)]
+            if getattr(self.retrieval, "visual", None) and self.retrieval.visual.config.enabled:
+                local_tools.append(PDFVisualTool(self.retrieval.visual, context, policy, self.visual_gateway, record))
             tools = self.registry.for_policy(
                 self.whitelist, policy,
-                local_tools=[RAGTool(self.retrieval, policy, record)], wrap=wrap,
+                local_tools=local_tools, wrap=wrap,
             )
             if self.context_manager:
                 tools.append(ContextReadTool(self.context_manager, context, observation_run))
@@ -218,6 +224,7 @@ class ResearchRuntime:
             paper_tool=self.paper_reader,
             pdfmux_tool=self.pdfmux_tool,
             pipeline=self.retrieval.pipeline,
+            visual=self.retrieval.visual,
         )
 
     def usage_snapshot(self) -> dict:
@@ -340,7 +347,7 @@ class ResearchRuntimeProvider:
         if (capability == "pdf" and pdf is None) or (capability == "paper" and paper is None):
             raise RuntimeError("PDF 解析工具不可用，请检查 pdfmux 配置后重试。" if capability == "pdf"
                                else "论文读取工具不可用，请检查 paper-search 配置后重试。")
-        return LibraryManager(self._config.data_dir, paper, pdf, self._retrieval.pipeline)
+        return LibraryManager(self._config.data_dir, paper, pdf, self._retrieval.pipeline, self._retrieval.visual)
 
     def close(self) -> None:
         for runtime in self._runtimes.values():

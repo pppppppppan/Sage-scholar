@@ -14,7 +14,8 @@
         "read_arxiv_paper",
         "mcp__github__search_repositories",
         "mcp__github__search_code",
-        "rag_search"
+        "rag_search",
+        "read_pdf_visual"
       ]
     },
     "reviewer": {
