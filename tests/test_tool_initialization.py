@@ -34,7 +34,6 @@ def test_direct_and_local_qa_do_not_initialize_mcp(monkeypatch, library):
     monkeypatch.setattr(module, "LegacyModelGateway", lambda _: ToolGateway("Method A [1]"))
     monkeypatch.setattr(module, "LocalClassifier", lambda _: FixedClassifier())
     monkeypatch.setattr("sage_scholar.research.runtime.iter_mcp_clients", forbidden)
-    monkeypatch.setattr("sage_scholar.research.runtime.create_mcp_clients", forbidden)
     async def scenario():
         container = module.ApplicationContainer(adapter._config)
         direct = await container.query_service.execute(QueryCommand(query="解释 KL 散度", workflow=Workflow.DIRECT))
@@ -52,7 +51,7 @@ def test_direct_and_local_qa_do_not_initialize_mcp(monkeypatch, library):
 def test_offline_research_never_loads_web_even_in_external_capable_runtime(monkeypatch, tmp_path, library):
     _, adapter, a, _, _, _ = library
     runtime, request = build_runtime(monkeypatch, tmp_path, adapter, SourceScope.SELECTED_DOCUMENTS, [a.document_id])
-    runtime._connect_external, runtime._tools_initialized = True, False
+    runtime._connect_external = True
     monkeypatch.setattr("sage_scholar.research.runtime.iter_mcp_clients", forbidden)
     events = list(runtime.run_research(request))
     assert any("finalize_node" in event for event in events)
@@ -63,7 +62,7 @@ def test_offline_research_never_loads_web_even_in_external_capable_runtime(monke
 def test_public_initialization_progress_failure_fallback_and_cache(monkeypatch, tmp_path, library, gap):
     _, adapter, _, _, _, _ = library
     runtime, request = build_runtime(monkeypatch, tmp_path, adapter, SourceScope.PUBLIC, [], approved=not gap)
-    runtime._connect_external, runtime._tools_initialized = True, False
+    runtime._connect_external = True
     calls = []
     def initialize(path, *, server_names, connect_timeout):
         calls.append(set(server_names))
@@ -131,8 +130,8 @@ def test_pdf_ingestion_only_loads_pdf_tool_and_no_research_model(monkeypatch, tm
         def disconnect(self): pass
     def connect(path, *, server_names, connect_timeout):
         selections.append(set(server_names))
-        return [PDFClient()]
-    monkeypatch.setattr("sage_scholar.research.runtime.create_mcp_clients", connect)
+        yield {"server": "pdfmux", "status": "available", "message": "PDF 已就绪"}, PDFClient()
+    monkeypatch.setattr("sage_scholar.research.runtime.iter_mcp_clients", connect)
     provider = ResearchRuntimeProvider(adapter._config, forbidden, adapter)
     service = DocumentService(provider, adapter._config.data_dir, lambda: adapter.pipeline)
     source = tmp_path / "paper.pdf"

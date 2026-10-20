@@ -7,7 +7,7 @@ from sage_scholar.tools.base_tool import ToolCallError
 
 
 def invoke_tools(llm, messages, tools, *, tag, max_tokens=4096, temperature=0,
-                 final_schema=None, max_rounds=4, max_calls=12, images=None):
+                 final_schema=None, max_rounds=4, max_calls=12, images=None, finish_when=None):
     history = deepcopy(messages)
     mapping = {t.name: t for t in tools}
     schemas = [t.to_schema() for t in tools]
@@ -17,7 +17,7 @@ def invoke_tools(llm, messages, tools, *, tag, max_tokens=4096, temperature=0,
     used = 0
     for step in range(max_rounds + 1):
         check_control()
-        final = step == max_rounds or used >= max_calls
+        final = step == max_rounds or used >= max_calls or bool(finish_when and finish_when())
         available = ([final_schema] if final_schema else None) if final else schemas
         choice = {"type": "function", "function": {"name": terminal}} if final_schema and final else ("none" if final else "auto")
         response = llm.invoke(messages=history, tools=available, tool_choice=choice,

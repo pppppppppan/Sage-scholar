@@ -13,9 +13,15 @@ const cache = path.join(root, "node_modules/.cache");
 mkdirSync(cache, { recursive: true });
 const output = mkdtempSync(path.join(cache, "sage-markdown-test-"));
 after(() => rmSync(output, { recursive: true, force: true }));
+// Native Node ESM needs the .js suffix and CJS default interop normally supplied
+// by Next's bundler. Exercise the real Image implementation, not an image stub.
+writeFileSync(path.join(output, "NextImage.mjs"),
+  'import image from "next/image.js"; export default image.default ?? image;');
 const sources = ["lib/markdown.ts", "lib/api.ts", "components/MarkdownContent.tsx", "components/InlineAnswer.tsx", "components/ReportView.tsx"];
 for (const name of sources) {
-  const source = readFileSync(path.join(root, name), "utf8").replace(/@\/(?:components|lib)\/([A-Za-z]+)/g, "./$1.mjs");
+  const source = readFileSync(path.join(root, name), "utf8")
+    .replace(/@\/(?:components|lib)\/([A-Za-z]+)/g, "./$1.mjs")
+    .replace(/from "next\/image"/g, 'from "./NextImage.mjs"');
   const compiled = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022,
   }}).outputText;
@@ -118,4 +124,15 @@ test("resumed SSE skips old terminal events but replays results and current comp
     await done.promise;
     assert.deepEqual(received.map(e => e.type), ["run_resumed", "write", "run_finished"]);
   } finally { clearTimeout(timeout); cancel(); }
+});
+
+
+test("visual Evidence retains page and original image URL in QA", () => {
+  const html = renderToStaticMarkup(React.createElement(InlineAnswer, {
+    answer: "Figure 2 [1]", evidence: [{ evidence_id: "ev_figure", source_id: "paper", section: "Figure 2",
+      page: 5, text: "Original image, not a verified caption", metadata: {kind: "visual_source", width: 800, height: 1000}}],
+  }));
+  assert.match(html, /p\.5/);
+  assert.match(html, /<img/);
+  assert.match(html, /\/api\/evidence\/ev_figure\/image/);
 });

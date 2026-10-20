@@ -47,6 +47,16 @@ class Embedding:
             return self.local.identity
         return {"provider": "api", "model": self.model, "base_url": self.base_url}
 
+    def token_policy(self):
+        if self.local is not None:
+            return self.local.token_policy()
+        # APIs do not expose a portable tokenizer. Configure the provider's input
+        # limit; byte counting is conservative and never silently truncates text.
+        maximum = int(os.getenv("EMBEDDING_MAX_INPUT_TOKENS", "512"))
+        if maximum < 32:
+            raise ValueError("EMBEDDING_MAX_INPUT_TOKENS 必须至少为 32")
+        return maximum, lambda text: len(text.encode("utf-8"))
+
     MAX_BATCH_SIZE = 64
 
     def invoke(self, input_text: list[str] | str, *, task: str | None = None) -> tuple[list, int]:

@@ -27,11 +27,11 @@ from sage_scholar.infrastructure.retrieval import LegacyRetrievalAdapter
 from sage_scholar.tools.policy import EvidenceTool
 from sage_scholar.graph import build_graph
 from sage_scholar.library import LibraryManager
-from sage_scholar.mcp import create_mcp_clients, register_mcp_tools
+from sage_scholar.mcp.lifecycle import MCPLifecycle
 from sage_scholar.mcp.loader import CAPABILITY_SERVERS, RESEARCH_SERVERS, iter_mcp_clients
 from sage_scholar.rag import Pipeline
 from sage_scholar.search import SearchTool
-from sage_scholar.tools import PaperReaderTool, RAGTool, ToolRegistry
+from sage_scholar.tools import PaperReaderTool, RAGTool
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +39,20 @@ logger = logging.getLogger(__name__)
 class ResearchRuntime:
     """Composition root for migrated SAGE Research capabilities."""
 
-    def __init__(self, config: Config, llm_client: LLMClient | None = None, pipeline: Pipeline | None = None, retrieval=None, connect_external: bool = True, store=None, checkpoints=None, context_manager=None):
+    def __init__(self, config: Config, llm_client: LLMClient | None = None, pipeline: Pipeline | None = None, retrieval=None, connect_external: bool = True, store=None, checkpoints=None, context_manager=None, mcp_lifecycle=None):
         self.config = config
         self.store, self.checkpoints, self.context_manager = store, checkpoints, context_manager
         self.llm_client = llm_client or LLMClient(model=config.llm.model, timeout=config.llm.timeout, context_manager=context_manager)
         self.retrieval = retrieval or LegacyRetrievalAdapter(config, pipeline=pipeline)
         from sage_scholar.infrastructure.model_gateway import LegacyModelGateway
         self.visual_gateway = LegacyModelGateway(config, context_manager)
-        self.mcp_clients = []
-        self.registry = ToolRegistry()
+        self._owns_mcp = mcp_lifecycle is None
+        self._mcp = mcp_lifecycle or MCPLifecycle(os.path.join(config.config_dir, "mcp_servers.json"), config.mcp_connect_timeout)
+        self.mcp_clients = self._mcp.clients
+        self.registry = self._mcp.registry
         self.skills = getattr(context_manager, "skills", None)
         self.paper_reader = self.pdfmux_tool = None
         self._connect_external = connect_external
-        self._tools_initialized = not connect_external
         self._tools_lock = threading.Lock()
         self.tool_statuses = []
 
@@ -61,33 +62,31 @@ class ResearchRuntime:
 
     def _initialize_research_tools(self):
         with self._tools_lock:
-            if not self._tools_initialized:
-                for status in self.tool_statuses:
-                    yield {"initialization_node": status}
-                remaining = RESEARCH_SERVERS - {status["server"] for status in self.tool_statuses}
-                for status, client in iter_mcp_clients(
-                    os.path.join(self.config.config_dir, "mcp_servers.json"),
-                    server_names=remaining, connect_timeout=self.config.mcp_connect_timeout,
-                ):
-                    self.tool_statuses.append(status)
-                    if client is not None:
-                        self.mcp_clients.append(client)
-                        register_mcp_tools(self.registry, [client])
-                    check_control()
-                    yield {"initialization_node": status}
-                brave = self.registry.tools.get("mcp__brave-search__brave_web_search")
-                tavily = self.registry.tools.get("mcp__tavily__tavily_search")
-                if brave or tavily:
-                    self.registry.register_tool(SearchTool(brave_tool=brave, tavily_tool=tavily))
-                download = self.registry.tools.get("mcp__paper-search__download_arxiv")
-                read = self.registry.tools.get("mcp__paper-search__read_arxiv_paper")
-                if download and read:
-                    self.paper_reader = PaperReaderTool(download_tool=download, read_tool=read)
-                    self.registry.register_tool(self.paper_reader)
-                self._tools_initialized = True
-            else:
-                for status in self.tool_statuses:
-                    yield {"initialization_node": status}
+            self.tool_statuses = self._mcp.ensure(RESEARCH_SERVERS, iter_mcp_clients)
+            brave = self.registry.tools.get("mcp__brave-search__brave_web_search")
+            tavily = self.registry.tools.get("mcp__tavily__tavily_search")
+            dependencies = (brave, tavily)
+            if any(dependencies) and dependencies != getattr(self, "_search_dependencies", None):
+                self.registry.tools["search"] = SearchTool(brave_tool=brave, tavily_tool=tavily)
+                self._search_dependencies = dependencies
+            if not any(dependencies):
+                self.registry.tools.pop("search", None)
+                self._search_dependencies = None
+            download = self.registry.tools.get("mcp__paper-search__download_arxiv")
+            read = self.registry.tools.get("mcp__paper-search__read_arxiv_paper")
+            if download and read and (download, read) != getattr(self, "_paper_dependencies", None):
+                if self.paper_reader:
+                    self.paper_reader.cleanup()
+                self._paper_dependencies = (download, read)
+                self.paper_reader = PaperReaderTool(download_tool=download, read_tool=read)
+                self.registry.tools[self.paper_reader.name] = self.paper_reader
+            if not (download and read) and self.paper_reader:
+                self.registry.tools.pop(self.paper_reader.name, None)
+                self.paper_reader.cleanup()
+                self.paper_reader = None
+                self._paper_dependencies = None
+            for status in self.tool_statuses:
+                yield {"initialization_node": status}
 
     def run_research(self, request: ExecutionRequest, cancelled=lambda: False):
         yield {"initialization_node": {"status": "initializing", "message": "正在初始化研究工具…"}}
@@ -302,8 +301,8 @@ class ResearchRuntime:
     def close(self) -> None:
         if self.paper_reader:
             self.paper_reader.cleanup()
-        for client in self.mcp_clients:
-            client.disconnect()
+        if self._owns_mcp:
+            self._mcp.close()
 
 
 class ResearchRuntimeProvider:
@@ -320,17 +319,21 @@ class ResearchRuntimeProvider:
         self._retrieval = retrieval
         self._runtimes: dict[bool, ResearchRuntime] = {}
         self._library_tools = {}
-        self._library_clients = []
+        self._mcp = MCPLifecycle(os.path.join(config.config_dir, "mcp_servers.json"), config.mcp_connect_timeout)
+        self._library_clients = self._mcp.clients
         self._library_readers = []
+        self._closed = False
         self._lock = threading.Lock()
 
     def get(self, require_external: bool = True) -> ResearchRuntime:
         with self._lock:
+            if self._closed:
+                raise RuntimeError("MCP provider is closed")
             if require_external not in self._runtimes:
                 self._runtimes[require_external] = ResearchRuntime(
                     self._config, llm_client=self._llm_client_factory(),
                     retrieval=self._retrieval, connect_external=require_external,
-                    store=self.store, checkpoints=self.checkpoints, context_manager=self.context_manager,
+                    store=self.store, checkpoints=self.checkpoints, context_manager=self.context_manager, mcp_lifecycle=self._mcp,
                 )
             return self._runtimes[require_external]
 
@@ -338,31 +341,31 @@ class ResearchRuntimeProvider:
         """PDF/arXiv ingestion has no reason to instantiate a research LLM or web tools."""
         names = CAPABILITY_SERVERS[capability]
         with self._lock:
-            if capability not in self._library_tools:
-                clients = create_mcp_clients(
-                    os.path.join(self._config.config_dir, "mcp_servers.json"),
-                    server_names=names, connect_timeout=self._config.mcp_connect_timeout,
-                )
-                self._library_clients.extend(clients)
-                registry = ToolRegistry()
-                register_mcp_tools(registry, clients)
-                pdf = registry.tools.get("mcp__pdfmux__convert_pdf")
-                download = registry.tools.get("mcp__paper-search__download_arxiv")
-                read = registry.tools.get("mcp__paper-search__read_arxiv_paper")
-                paper = PaperReaderTool(download, read) if download and read else None
-                if paper:
-                    self._library_readers.append(paper)
-                self._library_tools[capability] = (paper, pdf)
-            paper, pdf = self._library_tools[capability]
+            if self._closed:
+                raise RuntimeError("MCP provider is closed")
+            self._mcp.ensure(names, iter_mcp_clients)
+            registry = self._mcp.registry
+            pdf = registry.tools.get("mcp__pdfmux__convert_pdf")
+            download = registry.tools.get("mcp__paper-search__download_arxiv")
+            read = registry.tools.get("mcp__paper-search__read_arxiv_paper")
+            paper = self._library_tools.get("paper") if download and read else None
+            if download and read and (download, read) != self._library_tools.get("paper_dependencies"):
+                paper = PaperReaderTool(download, read)
+                self._library_readers.append(paper)
+                self._library_tools["paper"] = paper
+                self._library_tools["paper_dependencies"] = (download, read)
         if (capability == "pdf" and pdf is None) or (capability == "paper" and paper is None):
             raise RuntimeError("PDF 解析工具不可用，请检查 pdfmux 配置后重试。" if capability == "pdf"
                                else "论文读取工具不可用，请检查 paper-search 配置后重试。")
         return LibraryManager(self._config.data_dir, paper, pdf, self._retrieval.pipeline, self._retrieval.visual)
 
     def close(self) -> None:
-        for runtime in self._runtimes.values():
-            runtime.close()
-        for client in self._library_clients:
-            client.disconnect()
-        for reader in self._library_readers:
-            reader.cleanup()
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            for runtime in self._runtimes.values():
+                runtime.close()
+            self._mcp.close()
+            for reader in self._library_readers:
+                reader.cleanup()

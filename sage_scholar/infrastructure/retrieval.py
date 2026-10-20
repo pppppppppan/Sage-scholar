@@ -47,7 +47,7 @@ class LegacyRetrievalAdapter:
     def retrieve_sync(self, query: str, policy: SourcePolicy, top_k: int = 5) -> list[EvidenceRef]:
         return self.retrieve_with_warnings(query, policy, top_k)[0]
 
-    def retrieve_with_warnings(self, query, policy, top_k=5):
+    def retrieve_with_warnings(self, query, policy, top_k=5, *, visual_mode="auto"):
         docs = {doc.converted_path: doc for doc in self.permitted_documents(policy)}
         if not docs:
             return [], []
@@ -58,8 +58,7 @@ class LegacyRetrievalAdapter:
             doc = docs.get(chunk.file_path)
             if doc is None:
                 continue
-            item = self._evidence(doc, chunk.content, score=score, chunk_index=chunk.chunk_idx,
-                                  location={"chunk_index": chunk.chunk_idx})
+            item = self._chunk_evidence(doc, chunk, score)
             evidence.append(item)
             # Read the containing section when the legacy chunk can be located unambiguously.
             matching = [
@@ -69,6 +68,9 @@ class LegacyRetrievalAdapter:
             if len(matching) == 1 and matching[0].original_text != chunk.content:
                 evidence.append(matching[0])
         text = list({item.evidence_id: item for item in evidence}.values())
+        from sage_scholar.visual.demand import needs_visual
+        if not needs_visual(query, mode=visual_mode, text_available=bool(text)):
+            return text, []
         images, warnings = self.visual.search(query, list(docs.values()), self.visual.config.max_images)
         # Different encoders have incomparable cosine scores. Fuse ranks, not vectors/scores.
         from sage_scholar.visual.fusion import fuse
@@ -81,6 +83,11 @@ class LegacyRetrievalAdapter:
         return [section for doc in self.permitted_documents(policy) for section in self._sections(doc)]
 
     def _sections(self, doc) -> list[EvidenceRef]:
+        from sage_scholar.rag.document import Document
+        from sage_scholar.rag.chunker import TextChunker
+        parsed = Document.read_file(doc.converted_path)
+        if parsed.elements is not None:
+            return [self._chunk_evidence(doc, c) for c in self._section_groups(TextChunker(6000).chunk(parsed))]
         text = Path(doc.converted_path).read_text(encoding="utf-8")
         headings = list(re.finditer(r"(?m)^#{1,6}\s+(.+)$", text))
         starts = sorted(set([0, *[match.start() for match in headings]]))
@@ -98,12 +105,52 @@ class LegacyRetrievalAdapter:
                     ))
         return result
 
+    @staticmethod
+    def _section_groups(chunks):
+        # Overview/tool section reading should not add one model call per tiny PDF
+        # block. Group bounded blocks from the same real section/page, retaining
+        # each original locator. Retrieval still indexes the individual token chunks.
+        groups = []
+        for chunk in chunks:
+            if (groups and groups[-1][-1].section == chunk.section
+                    and groups[-1][-1].page_start == chunk.page_start
+                    and sum(len(c.content.encode("utf-8")) + 2 for c in groups[-1]) + len(chunk.content.encode("utf-8")) <= 6000):
+                groups[-1].append(chunk)
+            else:
+                groups.append([chunk])
+        for index, group in enumerate(groups):
+            if len(group) == 1:
+                yield group[0]
+                continue
+            boxes = [c.metadata["bbox"] for c in group if c.metadata.get("bbox")]
+            bounds = {"bbox": [min(b[0] for b in boxes), min(b[1] for b in boxes),
+                               max(b[2] for b in boxes), max(b[3] for b in boxes)],
+                      "coordinate_system": "page_points_top_left"} if boxes else {}
+            yield group[0].model_copy(update={
+                "chunk_idx": index, "content": "\n\n".join(c.content for c in group),
+                "element_type": "section", "element_id": None,
+                "metadata": {**bounds, "source_locations": [{"element_id": c.element_id, **c.metadata} for c in group]},
+            })
+
+    def _chunk_evidence(self, doc, chunk, score=None):
+        location = {"chunk_index": chunk.chunk_idx, **chunk.metadata}
+        if chunk.element_id:
+            location["element_id"] = chunk.element_id
+        if chunk.page_end is not None:
+            location["page_end"] = chunk.page_end
+        return self._evidence(doc, chunk.content, score=score, chunk_index=chunk.chunk_idx,
+            section=chunk.section, page=chunk.page_start,
+            table=chunk.metadata.get("label") if chunk.element_type == "table" else None,
+            parser_version=chunk.parser_version if chunk.schema_version >= 2 else doc.parser_version,
+            location=location, metadata={"chunk_schema": chunk.schema_version,
+                "element_type": chunk.element_type, "label": chunk.metadata.get("label")})
+
     def _evidence(self, doc, original_text, **values):
         item = EvidenceRef.create(
             source_id=doc.source_identifier, document_id=doc.document_id,
-            source_version=doc.document_version, parser_version=doc.parser_version,
-            original_text=original_text, page=None,
-            metadata={"title": doc.title, "converted_path": doc.converted_path},
+            source_version=doc.document_version, parser_version=values.pop("parser_version", doc.parser_version),
+            original_text=original_text, page=values.pop("page", None),
+            metadata={"title": doc.title, "converted_path": doc.converted_path, **values.pop("metadata", {})},
             **values,
         )
         self.evidence_store.save(item)

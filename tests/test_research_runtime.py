@@ -48,7 +48,7 @@ def build_runtime(monkeypatch, tmp_path, adapter, scope, ids, approved=True):
     monkeypatch.setattr(module, "Writer", FakeWriter)
     def forbidden_connect(*args):
         raise AssertionError("Offline Research must not connect any MCP server")
-    monkeypatch.setattr(module, "create_mcp_clients", forbidden_connect)
+    monkeypatch.setattr(module, "iter_mcp_clients", forbidden_connect)
     runtime = ResearchRuntime(
         Config(data_dir=adapter._config.data_dir, config_dir=str(configs), max_rounds=0),
         llm_client=SimpleNamespace(total_calls=0, total_prompt_tokens=0, total_completion_tokens=0),

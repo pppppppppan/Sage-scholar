@@ -19,3 +19,6 @@ uvicorn>=0.34,<1
 pytest>=9.0,<10
 httpx>=0.28,<1
 langgraph-checkpoint-sqlite>=3.1,<4
+
+# PDF text structure/page provenance (also shared by optional visual retrieval).
+PyMuPDF>=1.26,<2

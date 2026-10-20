@@ -30,19 +30,31 @@ class LocalEmbedding:
         prefix = self.query_prefix if task == "query" else self.document_prefix
         # Serialize first load and inference to avoid duplicate model allocation on Mac.
         with self._lock:
-            if self._encoder is None:
-                logger.info("加载本地向量模型 %s（首次使用会下载模型），device=%s", self.model, self.device)
-                try:
-                    from sentence_transformers import SentenceTransformer
-                    self._encoder = SentenceTransformer(
-                        self.model, device=self.device, trust_remote_code=False,
-                        local_files_only=os.getenv("EMBEDDING_LOCAL_ONLY", "false").lower() == "true",
-                    )
-                except Exception as exc:
-                    raise RuntimeError("本地向量模型加载失败。首次使用需要下载模型，请检查 Hugging Face 网络连接，或将 EMBEDDING_LOCAL_MODEL 设为已下载的模型目录。") from exc
+            self._load_encoder()
             logger.info("本地向量化 %d 条文本，task=%s", len(texts), task)
             vectors = self._encoder.encode(
                 [prefix + text for text in texts], batch_size=self.batch_size,
                 normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=False,
             )
             return vectors.tolist()
+
+    def _load_encoder(self):
+        if self._encoder is None:
+            logger.info("加载本地向量模型 %s（首次使用会下载模型），device=%s", self.model, self.device)
+            try:
+                from sentence_transformers import SentenceTransformer
+                self._encoder = SentenceTransformer(
+                    self.model, device=self.device, trust_remote_code=False,
+                    local_files_only=os.getenv("EMBEDDING_LOCAL_ONLY", "false").lower() == "true",
+                )
+            except Exception as exc:
+                raise RuntimeError("本地向量模型加载失败。首次使用需要下载模型，请检查 Hugging Face 网络连接，或将 EMBEDDING_LOCAL_MODEL 设为已下载的模型目录。") from exc
+
+    def token_policy(self):
+        with self._lock:
+            self._load_encoder()
+            maximum = int(self._encoder.max_seq_length)
+        def count(text):
+            with self._lock:
+                return len(self._encoder.tokenizer.encode(self.document_prefix + text, add_special_tokens=True, truncation=False))
+        return maximum, count

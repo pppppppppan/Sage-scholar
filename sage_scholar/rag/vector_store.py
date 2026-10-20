@@ -1,4 +1,6 @@
 import math
+import logging
+import threading
 
 import json
 from pathlib import Path
@@ -11,16 +13,32 @@ from .document import Chunk
 
 class VectorStore:
     def __init__(self) -> None:
+        self.lock = threading.RLock()
+        self.index_revision = 0
         self.embedding_identity: dict | None = None
         self.chunks: list[Chunk] = []
         self._file_index: dict[str, list[Chunk]] = {}
 
     def add_chunks(self, chunks: list[Chunk]):
         for chunk in chunks:
+            if chunk.schema_version not in {1, 2}:
+                raise ValueError("未知 Chunk schema，请使用兼容版本或重建索引")
             if chunk.tokens is None:
                 chunk.tokens = jieba.lcut(chunk.content)
             self.chunks.append(chunk)
             self._file_index.setdefault(chunk.file_path, []).append(chunk)
+
+    def replace_file(self, file_path, chunks, *, save_path=None):
+        """Prepare a complete candidate before publishing; failure retains the old version."""
+        with self.lock:
+            candidate = VectorStore()
+            candidate.embedding_identity = self.embedding_identity
+            candidate.index_revision = self.index_revision + 1
+            candidate.add_chunks([c for c in self.chunks if c.file_path != file_path] + list(chunks))
+            if save_path is not None:
+                candidate.save_to_json(save_path)
+            self.chunks, self._file_index = candidate.chunks, candidate._file_index
+            self.index_revision = candidate.index_revision
 
     def cosine_search(
         self, query_embedding: list[float], top_k: int,
@@ -39,7 +57,7 @@ class VectorStore:
             for qi, ei in zip(query_embedding, ebd):
                 dot += qi * ei
             mod_ebd = math.sqrt(sum(x**2 for x in ebd))
-            cosine_score = dot / (mod_query * mod_ebd)
+            cosine_score = dot / (mod_query * mod_ebd) if mod_query and mod_ebd else 0.0
             score_pairs.append((chunk, cosine_score))
 
         score_pairs = sorted(score_pairs, key=lambda x: x[1], reverse=True)
@@ -99,12 +117,17 @@ class VectorStore:
 
     def save_to_json(self, file_path: str):
         chunk_dicts = [chunk.model_dump() for chunk in self.chunks]
-        write_json(Path(file_path), {"embedding_identity": self.embedding_identity, "chunks": chunk_dicts})
+        write_json(Path(file_path), {"schema_version": 2, "index_revision": self.index_revision,
+            "parser_versions": sorted({c.parser_version for c in self.chunks}),
+            "embedding_identity": self.embedding_identity, "chunks": chunk_dicts})
 
     @classmethod
     def load_json(cls, file_path: str) -> VectorStore:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
+        if isinstance(data, dict) and data.get("schema_version", 1) not in {1, 2}:
+            raise ValueError("未知向量索引 schema；拒绝混用，请使用兼容版本或重建")
+        revision = data.get("index_revision", 0) if isinstance(data, dict) else 0
         identity = data.get("embedding_identity") if isinstance(data, dict) else None
         data = data["chunks"] if isinstance(data, dict) else data
 
@@ -114,6 +137,9 @@ class VectorStore:
             chunks.append(chunk)
 
         vector_store = cls()
+        vector_store.index_revision = revision
+        if any(c.schema_version == 1 for c in chunks):
+            logging.getLogger(__name__).warning("读取旧文本索引：未知页码保持为空；重新导入 PDF 可建立结构化新版本")
         vector_store.embedding_identity = identity
         vector_store.add_chunks(chunks=chunks)
 
@@ -123,6 +149,7 @@ class VectorStore:
         if file_path not in self._file_index:
             return 0
 
+        self.index_revision += 1
         count = len(self._file_index[file_path])
         self.chunks = [chunk for chunk in self.chunks if chunk.file_path != file_path]
         del self._file_index[file_path]

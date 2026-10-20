@@ -87,11 +87,12 @@ def test_discovery_only_reads_frontmatter_and_refs_are_lazy(setup, monkeypatch):
     monkeypatch.setattr(loader, "read_bounded", tracked)
     req = request()
     skills.view(req, "paper-review")
-    assert reads == ["SKILL.md"]
+    assert reads == ["SKILL.md", "review-checklist.md"]
+    assert set(skills._load(req)["paper-review"]["files"]) == {"SKILL.md"}
     skills.view(req, "paper-review")
     skills.view(req, "paper-review", "references/review-checklist.md")
     skills.view(req, "paper-review", "references/review-checklist.md")
-    assert reads == ["SKILL.md", "review-checklist.md"]
+    assert reads == ["SKILL.md", "review-checklist.md", "review-checklist.md"]
 
 
 @pytest.mark.parametrize("name,path", [("../paper-review", None), ("missing-skill", None),
@@ -384,7 +385,7 @@ def test_unavailable_citation_sources_return_partial_not_fabricated_success(setu
 def test_qa_can_use_sections_when_initial_retrieval_has_no_hit(setup, library, monkeypatch):
     skills, manager, _, _ = setup
     _, adapter, doc, _, _, _ = library
-    monkeypatch.setattr(adapter, "retrieve_with_warnings", lambda *args: ([], []))
+    monkeypatch.setattr(adapter, "retrieve_with_warnings", lambda *args, **kwargs: ([], []))
     source = adapter.read_documents_sync(request(source_scope="selected_documents", document_ids=(doc.document_id,)).source_policy)[0]
     model = Model(manager, call("skill_view", name="paper-review"), call("document_sections"),
                   call("read_context_artifact", identity=source.evidence_id), answer("方法说明待验证。[" + source.evidence_id + "]"))

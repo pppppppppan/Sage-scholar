@@ -4,7 +4,7 @@
 
 在原文本 RAG 上增加独立的视觉索引：PDF → Docling 图表区域识别 / PyMuPDF 页面渲染 → 本地 Qwen3-VL-Embedding-2B → 图文两路检索 → RRF 排名融合 → DeepSeek 按需读原图。原有文本 embedding、BM25 和 reranker 不换模型、不清库；不同模型的向量不混算相似度。
 
-上传 PDF 的文字解析仍复用现有 pdfmux MCP；视觉部分在文字入库后补充构建，并未替换这项依赖。当前不支持绕过失败的文字解析、直接把纯图扫描 PDF 当成上传成功。
+上传 PDF 仍由 pdfmux MCP 生成 Markdown，并复用 PyMuPDF 提取真实页码、章节、段落、公式邻接解释和表格，写入版本目录中的 `document.structure.json`；视觉部分在文字入库后补充构建。当前不支持绕过失败的文字解析、直接把纯图扫描 PDF 当成上传成功。
 
 ### 启用
 
@@ -35,8 +35,8 @@ python -m sage_scholar.visual --document doc_xxx
 
 ### 检索、读图和来源
 
-- 文本问题继续通过原检索链获取文本；同时用同一个视觉 embedding 模型编码当前问题、检索 PDF 页面/图表，按排名融合。图号/页码只辅助定位，不替代语义检索。
-- QA 最多读取 `VISION_MAX_IMAGES=3` 张相关原图；概览仍读取原有文字章节，额外检索相关图片，不声称检查全部图表。
+- 文本检索始终先执行。普通文本问题有文本命中时不查询视觉 embedding、不发送图片；明确询问图表/页码/曲线，或文本检索为空时，才尝试视觉检索。无需新增 LLM 分类调用。API `metadata.visual_mode` 可取 `auto`（默认）、`off`、`on`。
+- QA 仅在需要视觉证据时最多读取 `VISION_MAX_IMAGES=3` 张原图；普通概览只读取文字。图号与页码联合排序，精确 crop 优先，缺失时回退对应整页；视觉服务失败保留文字回答并披露原图未核验，不能把 caption/OCR 当成已读原图。
 - Research 的 `rag_search` 返回图像 Evidence 来源，`read_pdf_visual` 按问题读取其真实像素。返回值明确标为模型解读，不冒充逐字原文。沿用已有工具 journal、取消、预算与 Evidence 权限检查。
 - 图片按 PDF 版本保存到转换目录的 `visual/`，索引记录模型/revision、解析器、PDF hash、图像 hash、页码和 bbox。换模型/revision须重建；旧图片文件保留供历史 Evidence 回读。删除文献后禁止继续从图片接口读取该文献。
 - QA 的 Evidence 展开区可看原图，Research 参考文献附原图链接。`GET /api/evidence/{id}/image` 只解析已登记的来源，不接受客户端文件路径。
@@ -304,7 +304,7 @@ npm --prefix web run build
 - MCP 在首次需要时按能力加载：公网研究只选 Tavily、fetch、paper-search；PDF 入库只选 pdfmux；arXiv 入库只选 paper-search。Direct、本地 QA 和禁止联网的研究不连接 Web MCP，GitHub 不随研究启动。
 - `.env` 的 `MCP_CONNECT_TIMEOUT=12` 设置每个服务的启动、握手及工具列表总期限（秒）。可选服务并行连接，失败后清理会有额外的有限等待，其他服务继续可用。缺少必需 key 时直接跳过。
 - SSE 提供工具初始化、可用/不可用和研究开始事件；前端显示简短提示，不展示 MCP 异常堆栈。研究能否完成仍由证据覆盖情况决定，工具故障本身不强制 PARTIAL；无可用来源或覆盖不足则返回 PARTIAL。
-- 工具状态缓存在当前进程；修改 key 或修复服务后需重启后端重新连接。此次没有改动 ResearchNote / Evidence / Gap Review / Writer / Verifier 主链。
+- MCP 按 Server 维护 uninitialized/ready/unavailable/retrying 状态。后续需要该能力的请求在退避到期后自动重试，每次每服务最多一次连接；默认退避 5、10、20…秒，上限 300 秒，由 `MCP_RETRY_BASE_SECONDS` / `MCP_RETRY_MAX_SECONDS` 配置。健康客户端复用，研究和文献导入共享生命周期锁，PDF/Paper Reader 首次失败不再永久缓存空值。网络恢复不要求重启；修改 `.env` 仍需重启以重新加载环境变量。
 
 本轮逐文件修改与验证范围见 [V3.2 修补记录](docs/v3.2-usability-patch.md)。
 
@@ -388,8 +388,20 @@ python -m sage_scholar.mcp.check --server tavily
 - Supervisor 在同一次规划工具循环中选择 Skill，再提交计划；Researcher 在自己的 ReAct History 中使用工具。Writer 和 Supervisor Review 直接读取本 Run 已选择的指南，无新增 Agent 或必跑核验步骤。
 - Direct/QA 复用现有 LLMClient 的受限工具循环；QA 可继续 `rag_search`、`document_sections`、`read_context_artifact` 和 PDF 视觉阅读，Direct 无权因为 Skill 而联网。相关调用受 Run Token/时间/工具预算和 ContextManager 约束。
 - `read_conversation` 从本次请求冻结的历史定位原回答，并返回同一 Conversation/Workspace 的原报告引用映射。历史回答和 Skill 都不是 Evidence，仍需按当前 SourcePolicy 回读来源原文。
-- 已选 Skill 的正文、版本、已读 references 保存至既有 SQLite `results` 的 `skills:v1`，同 Run 重读使用缓存，删除 Run 时一起清除。未读 references 只固定文件元数据清单，不提前加载正文；若文件在运行/恢复前已改变，拒绝混用并提示新建任务。已读文件则使用保存的版本。
+- 已选 Skill 的正文、版本、已读 references 保存至既有 SQLite `results` 的 `skills:v1`，同 Run 重读使用缓存，删除 Run 时一起清除。选中时对主文件及 references 计算内容 SHA-256，但仅主文件正文进入所选规范；reference 正文按需披露并缓存。mtime、inode 或合法目录迁移不影响版本；未读 reference 内容改变会拒绝混用，已保存正文始终使用固定版本。旧的元数据签名快照无法安全验证，明确要求重新开始，不静默升级。
 - `citation-check` 的固定元数据允许在已有研究笔记但没有可回读原文时报告 `unverifiable`，结果仍为 partial；普通调研及执行异常不因此获得“无证据完成”豁免。
 - ContextManager 固定一份已选主规范，剔除工具结果中的重复主正文；参考文件按普通工具观察管理，可重新按需加载。`skills` 单独纳入 Context token accounting。不会写入 EvidenceStore、文献 RAG 或用户长期 Memory。
 
 实现参考 [Hermes Agent 的 Skills 工具](https://github.com/NousResearch/hermes-agent/blob/main/tools/skills_tool.py) 的通用工具调用和渐进式披露，未引入其市场、自动生成、脚本执行或外部插件安装机制。项目 Skill 文件在 `skills/`，Python 实现在 `sage_scholar/skills/`。
+
+
+## 结构化文本索引与兼容迁移
+
+- 新 Chunk schema 为 `2`：保留 `section`、`page_start/page_end`、`element_type/element_id`、`metadata` 和 `parser_version`。PDF 坐标来自实际解析页；图注保存 Figure/Table label；表格按行分块并重复表头与表题，公式尽量携带紧邻变量解释。结构化来源信息传到检索与 Evidence，页面/图表和正文使用相同的文档版本及页码。
+- `RAG_CHUNK_TOKENS=480` 是分块目标，实际上限取它与当前 embedding 模型输入上限的较小值。本地使用模型自己的 tokenizer，包含 passage 前缀和特殊 token；未知远程 tokenizer 采用 UTF-8 字节保守计数，并用 `EMBEDDING_MAX_INPUT_TOKENS` 指定提供商限制。表头或单行超过限制时明确中止导入，不静默截断列、丢失表头或混入旧索引。
+- 向量 JSON 保存 envelope schema、index revision、parser versions 和全部 Chunk metadata。旧 list/envelope 格式兼容读取，旧 Chunk 记为 schema 1，未知页码保持 `None` 并记录迁移提示。未知 schema、向量模型/维度不匹配或 sidecar 内容校验错误会明确拒绝加载/更新。
+- **旧文献不自动重算向量**。需要页码定位时，在文献库选中原文献重新上传原始 PDF（带原 `document_id`）；原文档身份不变，新解析作为新版本发布。不能先删除旧索引。新解析/embedding/保存失败时保留旧 active version；新索引准备完成后才替换同路径 chunks，避免重复。历史 Evidence 与文件继续保留用于原版本回读，删除文献后仍按现有 SourcePolicy 拒绝访问。
+- PyMuPDF 已列入基础依赖，不要求下载 Docling/视觉模型才能得到文字页码。若旧环境未安装它，或 PDF 无可靠文本层，则保留 pdfmux 转换文字、披露无法定位页码；已有结构化版本重建遇到此类错误时保留旧版本。复杂扫描/OCR 和无法可靠恢复的公式/表格仍应回读原图核验。
+- 无证据普通 QA 仅在授权文献/历史报告或已选 Skill 存在时进入补充工具路径。普通补查最多一次；检查引用的 Skill 可按既有工具预算继续读历史报告。最终仍无原始证据则返回资料不足，诊断型 Skill 仅能报告 `unverifiable`，不能输出无依据科研结论。
+
+相关回归测试：`tests/test_seven_structured_rag.py`、`tests/test_seven_visual_qa.py`、`tests/test_seven_mcp_skills.py`、`tests/test_seven_externalization.py`。测试使用真实生成 PDF、本地 SQLite/索引以及 Fake 模型/MCP；不调用收费模型。

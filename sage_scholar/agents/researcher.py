@@ -253,6 +253,7 @@ class Researcher(AgentBase):
         # A paper body may legitimately contain a line beginning with "Failed".
         # Only the tool result envelope, never arbitrary source text, determines failure.
         failed = failed or is_error_result(tool_result)
+        final_result = self._externalize(tool_result)
         if failed:
             self._consecutive_failures += 1
             self._failed_tools[name] = self._failed_tools.get(name, 0) + 1
@@ -264,9 +265,9 @@ class Researcher(AgentBase):
             self._consecutive_failures = 0
             self._repeated_calls = 0
             self._failed_tools[name] = 0
-            self._successful_calls[key] = self._externalize(tool_result)
+            self._successful_calls[key] = final_result
         self._history.append(Message(
-            role="tool", content=self._externalize(tool_result), tool_call_id=tool_call_id,
+            role="tool", content=final_result, tool_call_id=tool_call_id,
         ))
 
     def _externalize(self, result):

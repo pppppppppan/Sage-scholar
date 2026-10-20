@@ -26,8 +26,11 @@ class SkillService:
 
     def _load(self, request):
         owner = self.owner(request)
-        return (self.store.result(owner, STATE_KEY) if self.store and request.run_id
+        state = (self.store.result(owner, STATE_KEY) if self.store and request.run_id
                 else deepcopy(self._ephemeral.get(owner))) or {}
+        for selected in state.values():
+            self.loader.validate(selected)
+        return state
 
     def _save(self, request, state):
         if self.store and request.run_id:

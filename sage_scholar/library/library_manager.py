@@ -75,6 +75,12 @@ class LibraryManager:
                     shutil.copyfile(downloaded, original)
             content_hash = hashlib.sha256((original or Path(new_path)).read_bytes()).hexdigest()
             parser_version = "pdfmux-adapter-v1" if converted.source_type == "pdf" else "markdown-adapter-v1"
+            if original and original.suffix.lower() == ".pdf":
+                from .pdf_structure import write_pdf_structure
+                parser_version, structure_warnings = write_pdf_structure(original, new_path)
+                doc.metadata["structure_warnings"] = structure_warnings
+                if existing and existing.parser_version == "pymupdf-structure-v2" and parser_version != existing.parser_version:
+                    raise ValueError("结构化解析失败，保留之前可用文档版本；请检查 PDF 后重试")
             if (doc.active_version and content_hash == doc.content_hash
                     and parser_version == doc.parser_version):
                 self._status(doc, IngestionStatus.READY)

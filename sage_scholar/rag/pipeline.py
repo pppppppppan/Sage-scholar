@@ -93,16 +93,27 @@ class Pipeline:
 
     def add_document(self, file_path: str, save: bool = True):
         document = Document.read_file(file_path)
+        maximum, count = self.embedding.token_policy()
+        target = min(maximum, int(os.getenv("RAG_CHUNK_TOKENS", "480")))
+        if target < 32:
+            raise ValueError("RAG_CHUNK_TOKENS 必须至少为 32")
+        self.chunker = TextChunker(target, count_tokens=count)
         chunks = self.chunker.chunk(document)
         text_chunks = [chunk.content for chunk in chunks]
         embedding_list, tokens = self.embedding.invoke(text_chunks)
 
+        if len(embedding_list) != len(chunks) or not chunks:
+            raise ValueError("文档没有可索引文本或 Embedding 数量不匹配，保留旧索引")
+        if len({len(vector) for vector in embedding_list}) != 1 or not embedding_list[0]:
+            raise ValueError("Embedding 返回不一致的维度，保留旧索引")
+        previous_dimension = next((len(c.embedding) for c in self.vector_store.chunks if c.embedding), None)
+        if previous_dimension and previous_dimension != len(embedding_list[0]):
+            raise ValueError("Embedding 维度发生变化，不能混用旧索引")
         for ebd, chunk in zip(embedding_list, chunks):
             chunk.embedding = ebd
 
-        self.vector_store.add_chunks(chunks)
-        if save:
-            self.save()
+        self.vector_store.replace_file(file_path, chunks,
+            save_path=os.path.join(self.data_dir, self.VECTOR_STORE_FILE) if save else None)
 
     def add_text(self, text: str, query: str):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

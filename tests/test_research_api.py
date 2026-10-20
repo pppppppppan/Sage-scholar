@@ -52,7 +52,7 @@ def test_research_api_citations_progress_and_partial(monkeypatch, tmp_path, libr
             return ChatCompletionMessage(role="assistant", content=json.dumps(result) if isinstance(result, dict) else result)
     def forbid_mcp(*args):
         raise AssertionError("local-only research attempted external connection")
-    monkeypatch.setattr("sage_scholar.research.runtime.create_mcp_clients", forbid_mcp)
+    monkeypatch.setattr("sage_scholar.research.runtime.iter_mcp_clients", forbid_mcp)
     runtime = ResearchRuntime(config, llm_client=Model(), retrieval=adapter, connect_external=False)
     class Provider:
         def get(self, require_external):

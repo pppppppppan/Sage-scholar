@@ -93,6 +93,15 @@ class VisualService:
         return manifest
 
     def search(self, query, docs, top_k=3):
+        try:
+            return self._search(query, docs, top_k)
+        except WorkflowInterrupted:
+            raise
+        except Exception:
+            logger.warning("Visual retrieval unavailable", exc_info=True)
+            return [], ["图片检索不可用，本次保留文字结果；图像内容尚未核验。"]
+
+    def _search(self, query, docs, top_k=3):
         if not self.config.enabled:
             return [], []
         import numpy as np
@@ -108,53 +117,75 @@ class VisualService:
                 if manifest.warning:
                     warnings.append(f"《{doc.title}》：{manifest.warning}")
                 if manifest.status != "ready":
-                    warnings.append(f"《{doc.title}》图片向量未就绪，目前仅使用文字。")
-                    continue
+                    warnings.append(f"《{doc.title}》图片向量未就绪，仅能尝试图号/页码定位。")
                 identity = {k: v for k, v in manifest.embedding_identity.items() if k != "dimension"}
-                if identity != self.encoder.identity:
-                    raise ValueError("视觉 Embedding 配置已变化，请重建图片索引")
-                candidates.extend((doc, manifest, item) for item in manifest.elements if item.vector)
+                if manifest.status == "ready" and identity != self.encoder.identity:
+                    warnings.append("视觉 Embedding 配置已变化，仅使用图号/页码定位；请重建图片索引。")
+                candidates.extend((doc, manifest, item) for item in manifest.elements)
             except (ValueError, OSError):
                 warnings.append(f"《{doc.title}》图片索引不可用，请重建。")
         if not candidates:
             return [], list(dict.fromkeys(warnings))
+        # Source locators work even when the visual encoder is unavailable. Semantic
+        # scores only break ties; never overwrite a figure match with a page match.
+        label = re.search(r"(?:figure|fig\.?|图|table|表)\s*(\d+(?:[.\-]\d+)?)", query, re.I)
+        page_ref = re.search(r"(?:第\s*(\d+)\s*页|\bpage\s+(\d+)\b)", query, re.I)
+        page_number = int(page_ref.group(1) or page_ref.group(2)) if page_ref else None
+        vector = None
         try:
             vector = np.asarray(self.encoder.encode([query])[0])
         except WorkflowInterrupted:
             raise
         except Exception:
             logger.warning("Visual query encoding failed", exc_info=True)
-            return [], [*warnings, "视觉检索模型不可用，本次只检索文字，未读取原图。"]
+            warnings.append("视觉语义检索不可用，仅尝试图号/页码定位；未读取原图。")
         ranks = []
-        # Figure/page references are source locators, not semantic intent classification.
-        label = re.search(r"(?:figure|fig\.?|图|table|表)\s*(\d+(?:[.\-]\d+)?)", query, re.I)
-        page_ref = re.search(r"(?:第\s*(\d+)\s*页|\bpage\s+(\d+)\b)", query, re.I)
+        target_kind = ("table" if re.match(r"table|表", label.group(), re.I) else "figure") if label else None
         for doc, manifest, item in candidates:
-            if len(item.vector) != len(vector):
-                warnings.append("视觉索引维度不匹配，已跳过；请重建。")
+            number = re.search(r"\d+(?:[.\-]\d+)?", item.label or item.caption)
+            number_match = bool(label and item.kind == target_kind and number and number.group() == label.group(1))
+            page_match = page_number is not None and item.page == page_number
+            caption_pattern = ((r"(?:table|表)" if target_kind == "table" else r"(?:figure|fig\.?|图)")
+                               + r"\s*" + re.escape(label.group(1)) + r"(?!\d|[.\-]\d)") if label else None
+            caption_match = bool(caption_pattern and re.search(caption_pattern, item.text + item.caption, re.I))
+            if label and page_ref:
+                priority = 4 if number_match and page_match else 3 if page_match and item.kind == "page" else 2 if number_match else 0
+            elif label:
+                priority = 4 if number_match else 2 if item.kind == "page" and caption_match else 0
+            elif page_ref:
+                priority = 4 if page_match and item.kind == "page" else 2 if page_match else 0
+            else:
+                priority = 0
+            if page_ref and not page_match:
                 continue
-            exact = False
-            if label:
-                target_kind = "table" if re.match(r"table|表", label.group(), re.I) else "figure"
-                number = re.search(r"\d+(?:[.\-]\d+)?", item.label)
-                exact = item.kind == target_kind and number is not None and number.group() == label.group(1)
-            if page_ref:
-                exact = item.kind == "page" and item.page == int(page_ref.group(1) or page_ref.group(2))
-            score = float(vector @ np.asarray(item.vector))
-            ranks.append((exact, score, doc, manifest, item))
+            if label and item.kind != "page" and not number_match:
+                continue
+            compatible = manifest.status == "ready" and {k: v for k, v in manifest.embedding_identity.items() if k != "dimension"} == self.encoder.identity
+            if (vector is None or not item.vector or not compatible) and priority == 0:
+                continue
+            score = 0.
+            if vector is not None and item.vector and compatible:
+                if len(item.vector) != len(vector):
+                    warnings.append("视觉索引维度不匹配，已跳过语义分数；请重建。")
+                else:
+                    score = float(vector @ np.asarray(item.vector))
+            ranks.append((priority, score, doc, manifest, item))
         ranks.sort(key=lambda r: (r[0], r[1]), reverse=True)
-        selected, pages = [], set()
-        for exact, score, doc, manifest, item in ranks:
+        selected, pages, full_pages = [], set(), set()
+        for priority, score, doc, manifest, item in ranks:
             key = (doc.document_id, item.page)
-            # Avoid whole-page duplicates of retrieved crops; multiple independent figures survive.
-            if item.kind == "page" and key in pages:
+            if key in full_pages or (item.kind == "page" and key in pages):
                 continue
-            if item.kind != "page":
-                selected = [e for e in selected if not (e.document_id == doc.document_id and e.page == item.page
-                            and e.metadata.get("visual_kind") == "page")]
-            evidence = self._evidence(doc, manifest, item, score)
+            try:
+                evidence = self._evidence(doc, manifest, item, score)
+                self.resolve_image(evidence)  # Missing/damaged crop falls back to its page.
+            except (OSError, ValueError):
+                warnings.append(f"《{doc.title}》第 {item.page} 页的部分图片损坏或缺失。")
+                continue
             selected.append(evidence)
             pages.add(key)
+            if item.kind == "page":
+                full_pages.add(key)
             if len(selected) >= top_k:
                 break
         return selected, list(dict.fromkeys(warnings))
