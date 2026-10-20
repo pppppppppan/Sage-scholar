@@ -17,8 +17,8 @@ def execution_budget(workflow, requested=None):
     kind = str(workflow)
     defaults = {'router': {'max_total_tokens': 50_000, 'max_seconds': 300, 'max_tool_calls': 0},
                 'clarify': {'max_total_tokens': 50_000, 'max_seconds': 300, 'max_tool_calls': 0},
-                'direct': {'max_total_tokens': 50_000, 'max_seconds': 300, 'max_tool_calls': 0},
-                'qa': {'max_total_tokens': 300_000, 'max_seconds': 900, 'max_tool_calls': 0},
+                'direct': {'max_total_tokens': 50_000, 'max_seconds': 300, 'max_tool_calls': 12},
+                'qa': {'max_total_tokens': 300_000, 'max_seconds': 900, 'max_tool_calls': 20},
                 'deep_research': {
                     'max_total_tokens': 600_000,
                     'report_reserve_tokens': 150_000,

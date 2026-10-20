@@ -26,7 +26,12 @@ def test_direct_and_local_qa_do_not_initialize_mcp(monkeypatch, library):
     _, adapter, a, _, _, _ = library
     import sage_scholar.infrastructure.container as module
     monkeypatch.setattr(module, "LegacyRetrievalAdapter", lambda _: adapter)
-    monkeypatch.setattr(module, "LegacyModelGateway", lambda _: FakeModel("Method A [1]"))
+    from openai.types.chat import ChatCompletionMessage
+    class ToolGateway(FakeModel):
+        @property
+        def client(self):
+            return SimpleNamespace(invoke=lambda **kwargs: ChatCompletionMessage(role="assistant", content="Method A [1]"))
+    monkeypatch.setattr(module, "LegacyModelGateway", lambda _: ToolGateway("Method A [1]"))
     monkeypatch.setattr(module, "LocalClassifier", lambda _: FixedClassifier())
     monkeypatch.setattr("sage_scholar.research.runtime.iter_mcp_clients", forbidden)
     monkeypatch.setattr("sage_scholar.research.runtime.create_mcp_clients", forbidden)

@@ -11,8 +11,9 @@ from sage_scholar.domain.execution import ExecutionRequest
 
 
 class DirectService:
-    def __init__(self, model: ModelGateway, clock: Callable[[ZoneInfo], datetime] | None = None, *, context_manager=None):
+    def __init__(self, model: ModelGateway, clock: Callable[[ZoneInfo], datetime] | None = None, *, context_manager=None, skill_support=None):
         self._model = model
+        self._skills = skill_support
         self._context_manager = context_manager
         self._clock = clock or (lambda timezone: datetime.now(timezone))
 
@@ -20,6 +21,8 @@ class DirectService:
         self,
         request: ExecutionRequest,
     ) -> str:
+        if self._skills:
+            self._skills.prepare(request)
         query, timezone, history = request.query, request.timezone, request.history
         if re.search(r"今天.{0,3}(星期几|周几)|今天是星期|今天是周", query):
             try:
@@ -52,6 +55,8 @@ class DirectService:
                     messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": query})
 
+        if self._skills:
+            return await self._skills.complete(request, messages, evidence=[], tag="direct")
         return await self._model.complete(
             messages,
             tag="direct",

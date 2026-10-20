@@ -35,10 +35,10 @@ def build_runtime(monkeypatch, tmp_path, adapter, scope, ids, approved=True):
             assert request.source_policy.document_ids == tuple(ids)
             assert request.source_policy.permits_web == (scope == SourceScope.PUBLIC)
             if scope == SourceScope.PUBLIC:
-                assert set(self.tools) == {"web_fetch"}
+                assert set(self.tools) == {"web_fetch", "read_conversation"}
                 content = self.tools["web_fetch"].run_tool({"url": "https://example.org/paper"})
             else:
-                assert set(self.tools) == {"rag_search"}
+                assert set(self.tools) == {"rag_search", "read_conversation", "document_sections"}
                 content = self.tools["rag_search"].run_tool({"query": "method", "document_ids": ["other"]})
                 assert "Method A" in content and "SECRET B" not in content
             return ResearchNote(task_id=task.task_id, question=task.objective,

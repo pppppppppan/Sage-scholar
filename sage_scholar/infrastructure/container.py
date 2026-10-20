@@ -37,6 +37,9 @@ class ApplicationContainer:
             history_tokens=self.config.context.history_tokens, report_tokens=self.config.context.report_tokens,
             agent_tokens=self.config.context.agent_tokens)
         self.context_manager.run_store = self.run_store
+        from sage_scholar.skills import SkillService
+        self.skills = SkillService(self.run_store)
+        self.context_manager.skills = self.skills
         self.model_gateway = LegacyModelGateway(self.config)
         self.model_gateway.context_manager = self.context_manager
         self.retrieval = LegacyRetrievalAdapter(self.config)
@@ -64,11 +67,13 @@ class ApplicationContainer:
             self.config.data_dir,
             pipeline_factory=lambda: self.retrieval.pipeline,
         )
+        from sage_scholar.application.skill_support import SkillSupport
+        self.skill_support = SkillSupport(self.skills, self.model_gateway, self.retrieval, self.context_manager)
         self.query_service = QueryService(
             router=QueryRouter(LocalClassifier(self.config.router), confidence_threshold=self.config.router.confidence_threshold),
             document_resolver=DocumentResolver(self.retrieval.documents),
-            direct=DirectService(self.model_gateway, context_manager=self.context_manager),
-            qa=QAService(self.retrieval, self.model_gateway, context_manager=self.context_manager),
+            direct=DirectService(self.model_gateway, context_manager=self.context_manager, skill_support=self.skill_support),
+            qa=QAService(self.retrieval, self.model_gateway, context_manager=self.context_manager, skill_support=self.skill_support),
             run_manager=self.run_manager,
             long_runners=self.runners,
             memory_store=self.memory_service,

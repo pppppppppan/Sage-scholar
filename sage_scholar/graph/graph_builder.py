@@ -168,7 +168,8 @@ def build_graph(supervisor, create_researcher, writer, *, budget=None, checkpoin
     def write_node(state):
         get_stream_writer()({"progress_node": {"event": "report_drafting", "phase": "started"}})
         usable = [n for n in notes(state) if n.status != "failed" and n.content.strip()]
-        if not any(n.source_ids for n in usable):
+        diagnostic = bool(usable and getattr(writer, "can_report_without_sources", lambda request: False)(state["execution"]))
+        if not any(n.source_ids for n in usable) and not diagnostic:
             raise ValueError("未取得可回读的来源，无法生成有来源的研究报告；已有记录已保存")
         result = writer.run(state["execution"], usable, state["supervisor_review"].remaining_gaps)
         return {"report_result": result, "final_report": result.report}

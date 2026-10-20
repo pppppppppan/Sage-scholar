@@ -193,7 +193,7 @@ ROUTER_CONFIDENCE_THRESHOLD=0.65
 - 长任务：创建、查询、取消、持久化 SSE 回放、兼容 checkpoint 恢复、显式重新开始；状态保存在本地 SQLite。
 - 自适应路由：`今天是星期几` 走 Direct，`帮我调研 AI4CFD 领域的主要方法` 走 Deep Research；指代论文但未选择文档时返回澄清提示。
 
-独立 `Search`、`Citation Audit` 和 `Paper2Code` 尚无入口执行链，显式 API 请求会被拒绝。需要外部资料的查询进入 Deep Research；路由模型识别出未支持的任务时请求澄清，不承诺虚假结果。
+独立 `Search`、`Citation Audit` 和 `Paper2Code` 尚无入口执行链，显式 API 请求会被拒绝。需要外部资料的查询进入 Deep Research。论文审查和引用检查通过按需 Skills 在 QA/Deep Research 中执行，不是独立 Citation Audit 工作流；执行代码复现仍不支持。
 
 ## 目录
 
@@ -378,3 +378,18 @@ python -m sage_scholar.mcp.check --server tavily
 - Review 优先判断全部笔记是否已能回答问题。新增补查须说明具体 `research_gap`、新研究目标与预期成果；仅仅要求更详细不会自动派任务。已完成/部分完成/待执行的相同范围会过滤，包含新增目标的部分交叉仍保留；被过滤任务声明的真实缺口不会被假装解决，而是留给 Writer 披露。
 - 显式“继续研究”不再把 remaining_gaps 字符串直接变成任务，没有已审定补充任务时先进入 Supervisor Review。原有轮次、总任务量、工具及 token 预算、Send 并行派发和 ResearchNote 汇总保持不变。
 - 新字段随 ResearchTask checkpoint 持久化；旧 checkpoint 缺少字段时使用空默认值。语义判断仍由同一次 Supervisor 调用负责，代码核验标识与覆盖关系，不声称字符串算法能够独立证明语义等价；测试使用固定模型输出，不替代真实模型效果验收。
+
+
+## 按需 Agent Skills
+
+内置 `paper-review`（论文审查）和 `citation-check`（引用身份/原文支持核验）。使用自然语言即可由模型判断是否加载，例如“仔细审查所选论文的实验设计”“检查刚才报告中的引用是否支持结论”。明确指定可写 `$paper-review` / `$citation-check`，或 API 的 `metadata.skills: ["paper-review"]`。普通问候和一般调研不强制使用 Skill。
+
+- `skills_list()` 只列名称和描述；`skill_view(name)` 加载 SKILL.md；`skill_view(name, file_path="references/xxx.md")` 按需读取参考规则。正文不在启动时注入。
+- Supervisor 在同一次规划工具循环中选择 Skill，再提交计划；Researcher 在自己的 ReAct History 中使用工具。Writer 和 Supervisor Review 直接读取本 Run 已选择的指南，无新增 Agent 或必跑核验步骤。
+- Direct/QA 复用现有 LLMClient 的受限工具循环；QA 可继续 `rag_search`、`document_sections`、`read_context_artifact` 和 PDF 视觉阅读，Direct 无权因为 Skill 而联网。相关调用受 Run Token/时间/工具预算和 ContextManager 约束。
+- `read_conversation` 从本次请求冻结的历史定位原回答，并返回同一 Conversation/Workspace 的原报告引用映射。历史回答和 Skill 都不是 Evidence，仍需按当前 SourcePolicy 回读来源原文。
+- 已选 Skill 的正文、版本、已读 references 保存至既有 SQLite `results` 的 `skills:v1`，同 Run 重读使用缓存，删除 Run 时一起清除。未读 references 只固定文件元数据清单，不提前加载正文；若文件在运行/恢复前已改变，拒绝混用并提示新建任务。已读文件则使用保存的版本。
+- `citation-check` 的固定元数据允许在已有研究笔记但没有可回读原文时报告 `unverifiable`，结果仍为 partial；普通调研及执行异常不因此获得“无证据完成”豁免。
+- ContextManager 固定一份已选主规范，剔除工具结果中的重复主正文；参考文件按普通工具观察管理，可重新按需加载。`skills` 单独纳入 Context token accounting。不会写入 EvidenceStore、文献 RAG 或用户长期 Memory。
+
+实现参考 [Hermes Agent 的 Skills 工具](https://github.com/NousResearch/hermes-agent/blob/main/tools/skills_tool.py) 的通用工具调用和渐进式披露，未引入其市场、自动生成、脚本执行或外部插件安装机制。项目 Skill 文件在 `skills/`，Python 实现在 `sage_scholar/skills/`。

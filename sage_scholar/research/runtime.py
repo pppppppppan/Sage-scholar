@@ -48,6 +48,7 @@ class ResearchRuntime:
         self.visual_gateway = LegacyModelGateway(config, context_manager)
         self.mcp_clients = []
         self.registry = ToolRegistry()
+        self.skills = getattr(context_manager, "skills", None)
         self.paper_reader = self.pdfmux_tool = None
         self._connect_external = connect_external
         self._tools_initialized = not connect_external
@@ -94,6 +95,8 @@ class ResearchRuntime:
             yield from self._initialize_research_tools()
         request = request.model_copy(update={"budget": execution_budget(request.workflow, request.budget)})
         policy = request.source_policy
+        if self.skills:
+            self.skills.explicit(request)
         context = ResearchEvidenceContext(self.retrieval.evidence_store, policy, self.retrieval.documents, self.context_manager)
         durable = bool(self.store and self.checkpoints and request.run_id)
         budget = ResearchBudget(request.budget["max_tool_calls"], self.store if durable else None, request.run_id)
@@ -141,6 +144,13 @@ class ResearchRuntime:
                 self.whitelist, policy,
                 local_tools=local_tools, wrap=wrap,
             )
+            if self.skills:
+                tools.extend(wrap(tool) for tool in self.skills.tools(request))
+            from sage_scholar.tools.tool_conversation import ConversationReadTool
+            tools.append(wrap(ConversationReadTool(request, self.store, context, record)))
+            if policy.permits_local:
+                from sage_scholar.tools.tool_sections import DocumentSectionsTool
+                tools.append(wrap(DocumentSectionsTool(self.retrieval, policy, record)))
             if self.context_manager:
                 tools.append(ContextReadTool(self.context_manager, context, observation_run))
             return tools
@@ -150,7 +160,7 @@ class ResearchRuntime:
             "source_policy": policy.model_dump(mode="json"),
             "available_tools": [tool.name for tool in available],
         }}
-        if not any(t.name != "read_context_artifact" for t in available) and not (durable and self.checkpoints.saver.get_tuple(self.checkpoints.research_config(request))):
+        if not any(t.source_access in {"local", "public"} for t in available) and not (durable and self.checkpoints.saver.get_tuple(self.checkpoints.research_config(request))):
             yield {"outcome_node": {"remaining_gaps": ["资料策略下没有可用工具，无法进行有证据的研究"]}}
             return
 
@@ -161,11 +171,11 @@ class ResearchRuntime:
         )
         supervisor = Supervisor(
             llm=self.llm_client,
-            max_steps=request.budget["max_steps"], review_llm=review_llm,
+            max_steps=request.budget["max_steps"], review_llm=review_llm, skills=self.skills,
         )
         writer = Writer(
             llm=self.llm_client, evidence_context=context,
-            temperature=self.config.llm.writer_temperature, max_output_tokens=self.config.generation.writer_tokens,
+            temperature=self.config.llm.writer_temperature, max_output_tokens=self.config.generation.writer_tokens, skills=self.skills,
         )
 
         def build_researcher(task_id, revision=0):

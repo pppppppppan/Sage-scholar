@@ -58,13 +58,18 @@ class ReviewResponse(SupervisorReview):
 
 
 class Supervisor:
-    def __init__(self, llm, max_steps, review_llm=None):
+    def __init__(self, llm, max_steps, review_llm=None, skills=None):
         self.llm, self.max_steps = llm, max_steps
+        self.skills = skills
         self.review_llm = review_llm or llm
 
     def plan(self, request):
+        if self.skills:
+            self.skills.explicit(request)
         result = structured_response(self.llm, ResearchPlan, [
             {"role": "system", "content": (
+                "若任务适合目录中的 Skill，先调用 skill_view 阅读规范再提交计划；普通调研无需加载。"
+                "已加载 Skill 可直接复用，引用检查原报告时让研究员回读本对话正确原报告及映射，不把摘要当核验对象。"
                 "你是研究主管。按最小充分拆分原则规划：完整覆盖用户目标，优先用尽量少且互补的任务。"
                 "先判断一个 Researcher 是否足够；简单、聚焦问题只生成 1 个任务。通常 1–4 个，"
                 "只有独立目标明确且并行确有收益时才增加，复杂综合研究才可更多，始终遵守 max_questions。"
@@ -89,7 +94,8 @@ class Supervisor:
             )},
             {"role": "user", "content": encoded({"brief": prompt_brief(request),
                 "max_questions": min(8, request.budget["max_tasks"]), "steps_per_question": self.max_steps})},
-        ], tag="supervisor:plan", max_tokens=2200)
+        ], tag="supervisor:plan", max_tokens=2200,
+            tools=self.skills.tools(request) if self.skills else None)
         questions = within_budget(consolidate(result.questions), request.budget["max_tasks"])
         check_coverage(result.requirements, questions)
         return questions

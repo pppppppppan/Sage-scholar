@@ -56,6 +56,7 @@ class ContextManager:
                                                history_tokens=history_tokens, report_tokens=report_tokens)
         self.memories = memories
         self.run_store = None
+        self.skills = None
 
     @staticmethod
     def build_messages(system_prompt, history):
@@ -184,6 +185,8 @@ class ContextManager:
         owner = self.owner(request)
         result = deepcopy(messages)
         self.validate_pairs(result)
+        if self.skills and request and not summary_mode:
+            result[0:0] = self.skills.context(request, result, tools, purpose)
         policy = policy_for(purpose)
         limit = self.agent_tokens.get(policy.agent, self.max_tokens)
         if model_context_limit is not None:
@@ -313,7 +316,7 @@ class ContextManager:
         return PreparedContext(clean, accounting)
 
     def _accounting(self, messages, tools, tool_choice, used, before, reserve):
-        categories = {key: 0 for key in ("fixed", "conversation", "memory", "research_state", "evidence", "tool", "artifact")}
+        categories = {key: 0 for key in ("fixed", "conversation", "memory", "skills", "research_state", "evidence", "tool", "artifact")}
         for message in messages:
             kind = message.get("_context_kind")
             if kind in {"compressed_history", "recent_conversation"}:
