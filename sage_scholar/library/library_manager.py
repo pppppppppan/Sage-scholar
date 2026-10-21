@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+from sage_scholar.runtime.control import check_control
+
 from pathlib import Path
 import re
 import shutil
@@ -10,6 +13,8 @@ from sage_scholar.domain.documents import DocumentRecord, DocumentVersion, Inges
 from sage_scholar.infrastructure.document_store import JsonDocumentStore
 from sage_scholar.infrastructure.json_store import file_lock
 from .converter import convert_to_markdown
+
+logger = logging.getLogger(__name__)
 
 
 class LibraryManager:
@@ -26,11 +31,24 @@ class LibraryManager:
 
     def ingest(self, src: str, custom_title: str | None = None, overwrite: bool = True,
                save_original: bool = True, *, document_id: str | None = None,
-               source_identifier: str | None = None) -> IngestResult:
+               source_identifier: str | None = None, cancelled=None) -> IngestResult:
         with self.ingestion_lock:
-            return self._ingest(src, custom_title, overwrite, save_original, document_id, source_identifier)
+            self._recover_index()
+            return self._ingest(src, custom_title, overwrite, save_original, document_id, source_identifier, cancelled)
 
-    def _ingest(self, src, custom_title, overwrite, save_original, document_id, source_identifier):
+    def _recover_index(self):
+        return self.pipeline.vector_store.reconcile_library(
+            self.data_dir, self.store.list(), save=self.pipeline.save)
+
+    @staticmethod
+    def _check_cancelled(cancelled):
+        check_control()
+        if cancelled and cancelled.is_set():
+            from asyncio import CancelledError
+            raise CancelledError("文档导入已取消")
+
+    def _ingest(self, src, custom_title, overwrite, save_original, document_id, source_identifier, cancelled=None):
+        self._check_cancelled(cancelled)
         arxiv = re.fullmatch(r"(\d{4}\.\d{4,5})(?:v\d+)?", src)
         source_key = source_identifier or (
             "arxiv:" + arxiv.group(1) if arxiv else "path:" + str(Path(src).resolve())
@@ -67,6 +85,7 @@ class LibraryManager:
                 src if arxiv else str(original), str(staging),
                 self.paper_tool, self.pdfmux_tool, custom_title="document",
             )
+            self._check_cancelled(cancelled)
             new_path = converted.output_path
             if arxiv:
                 downloaded = Path(self.paper_tool.download_dir) / f"{src}.pdf"
@@ -88,10 +107,12 @@ class LibraryManager:
                 return self._result(doc, "skipped")
 
             self._status(doc, IngestionStatus.INDEXING)
+            self._check_cancelled(cancelled)
             self.pipeline.add_document(new_path, save=False)
             # Keep previous chunks: active retrieval filters by the catalog's current path.
-            # A crash before catalog commit leaves only unreachable new chunks, not a lost old index.
+            # Startup reconciliation removes uncommitted chunks after a crash.
             self.pipeline.save()
+            self._check_cancelled(cancelled)
             number = max((version.version_number for version in doc.versions), default=0) + 1
             version = DocumentVersion(
                 document_version=f"v{number}", version_number=number,
@@ -109,15 +130,32 @@ class LibraryManager:
             current.metadata.update(source_type=converted.source_type, arxiv_id=converted.arxiv_id)
             if self.visual and original and original.suffix.lower() == ".pdf" and save_original:
                 current.metadata["visual"] = self.visual.build(original, new_path)
+            self._check_cancelled(cancelled)
             self._status(current, IngestionStatus.READY)
             committed = True
             return self._result(current, "overwritten" if existing else "created")
-        except Exception as exc:
-            if new_path and not committed:
-                self.pipeline.vector_store.remove_by_filepath(new_path)
-            # FAILED describes the latest attempt; active fields still describe the last good version.
-            doc.metadata["ingestion_error"] = str(exc)
-            self._status(doc, IngestionStatus.FAILED)
+        except BaseException as exc:
+            # Cancellation (including CancelledError) follows the same rollback.
+            # Re-read the authority: a write may have committed before its caller
+            # raised. Never erase that version or overwrite it with stale metadata.
+            catalog_checked = False
+            try:
+                actual = self.store.get(doc.document_id)
+                catalog_checked = True
+                committed = bool(new_path and actual and any(
+                    v.converted_path == new_path for v in actual.versions))
+                if not committed:
+                    self._recover_index()
+            except Exception as cleanup_error:
+                logger.exception("导入失败后的索引清理未完成；下次导入/启动将按 Catalog 重试")
+                exc.add_note(f"索引回滚待恢复: {type(cleanup_error).__name__}: {cleanup_error}")
+            if catalog_checked and not committed:
+                doc.metadata["ingestion_error"] = str(exc) or type(exc).__name__
+                try:
+                    self._status(doc, IngestionStatus.FAILED)
+                except Exception as status_error:
+                    logger.exception("保存导入失败状态失败")
+                    exc.add_note(f"失败状态未写入: {type(status_error).__name__}: {status_error}")
             raise
 
     def _status(self, doc, status):
@@ -138,6 +176,7 @@ class LibraryManager:
 
     def delete_doc(self, identifier: str):
         with self.ingestion_lock:
+            self._recover_index()
             docs = self.store.list()
             found = [doc for doc in docs if doc.document_id == identifier]
             if not found:
@@ -147,6 +186,11 @@ class LibraryManager:
             for doc in found:
                 # Hide from active retrieval first; historical evidence/files remain readable.
                 self.store.delete(doc.document_id)
-                for version in doc.versions:
-                    self.pipeline.vector_store.remove_by_filepath(version.converted_path)
-                self.pipeline.save()
+                # Explicit deletion also handles legacy paths outside our staging
+                # namespace. Startup orphan recovery never guesses their ownership.
+                with self.pipeline.vector_store.lock:
+                    for path in {v.converted_path for v in doc.versions} | {doc.converted_path}:
+                        if path:
+                            self.pipeline.vector_store.remove_by_filepath(path)
+                    self.pipeline.vector_store.cleanup_pending = True
+                    self._recover_index()

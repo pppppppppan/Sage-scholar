@@ -27,7 +27,7 @@ class SkillSupport:
     def allows_unverifiable(self, request):
         return self.skills.allows_unverifiable_report(request)
 
-    async def complete(self, request, messages, *, evidence, tag, images=None, allow_visual=True, visual_reads=None):
+    async def complete(self, request, messages, *, evidence, tag, images=None, allow_visual=True, visual_reads=None, visual_state=None):
         self.prepare(request)
         context = ResearchEvidenceContext(self.retrieval.evidence_store, request.source_policy,
                                           self.retrieval.documents, self.context_manager)
@@ -61,7 +61,8 @@ class SkillSupport:
                            DocumentSectionsTool(self.retrieval, request.source_policy, record)]
             visual = getattr(self.retrieval, "visual", None)
             if visual and visual.config.enabled and visual_mode != "off":
-                candidates.append(PDFVisualTool(visual, context, request.source_policy, self.model, record_visual))
+                visual_tool = PDFVisualTool(visual, context, request.source_policy, self.model, record_visual)
+                candidates.append(DeferredVisualTool(visual_tool, images) if images else visual_tool)
         registry = ToolRegistry()
         for tool in candidates:
             if initial_empty and tool.name in {"rag_search", "document_sections"}:
@@ -72,7 +73,9 @@ class SkillSupport:
         # work requiring public searches belongs to the existing Research workflow.
         with request_context(request):
             response = await cooperative_thread(invoke_tools,
-                self.model.vision_client if images else self.model.client, messages, tools,
+                self.model.client, messages, tools,
+                vision_llm=self.model.vision_client if images else None,
+                defer_images=bool(self.skills.selected(request)), visual_state=visual_state,
                 tag=tag, max_rounds=6 if tag == "qa" else 3, images=images,
                 finish_when=lambda: initial_empty and supplementary["attempted"] and not records and not self.skills.selected(request))
         return response.content or ""
@@ -89,4 +92,19 @@ class SupplementTool(BaseTool):
         if self.state["attempted"] and not self.selected():
             raise ToolCallError("本次补充检索已完成，资料不足请明确说明")
         self.state["attempted"] = True
+        return self.tool.run_tool(parameters)
+
+
+class DeferredVisualTool(BaseTool):
+    """Already selected pixels are read once by the final answer, not by each tool turn."""
+    def __init__(self, tool, images):
+        super().__init__(tool.name, tool.description, tool.parameters)
+        self.source_access, self.replay_policy = tool.source_access, tool.replay_policy
+        self.tool = tool
+        self.pending = {image["evidence_id"] for image in images}
+
+    def run_tool(self, parameters):
+        if parameters["evidence_id"] in self.pending:
+            # This is a pending observation, never verified evidence/visual_reads.
+            return "原图已在本次回答的待读图片中，将在最终回答时实际读取；当前尚未核验。"
         return self.tool.run_tool(parameters)

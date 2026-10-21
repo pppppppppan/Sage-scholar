@@ -29,7 +29,7 @@ class RunStore:
         if 'active_seconds' not in columns:
             self.conn.execute('ALTER TABLE budget ADD COLUMN active_seconds REAL NOT NULL DEFAULT 0')
         for column in ('cached_input_tokens', 'cache_observed_input_tokens', 'cache_observed_calls',
-                       'image_budget_tokens', 'image_input_tokens_estimated', 'image_count'):
+                       'image_budget_tokens', 'image_input_tokens_estimated', 'image_count', 'image_requests'):
             if column not in columns:
                 self.conn.execute(f'ALTER TABLE budget ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0')
         self.conn.execute('CREATE TABLE IF NOT EXISTS model_reservations (run_id TEXT, lease TEXT PRIMARY KEY, tokens INTEGER)')
@@ -73,8 +73,8 @@ class RunStore:
 
     def budget(self, run_id):
         with self.lock:
-            row = self.conn.execute("SELECT used,denied,blocked,prompt_tokens,completion_tokens,active_seconds,cached_input_tokens,cache_observed_input_tokens,cache_observed_calls,image_budget_tokens,image_input_tokens_estimated,image_count FROM budget WHERE run_id=?", (run_id,)).fetchone() or (0,) * 12
-        return dict(zip(("tool_calls", "denied_calls", "blocked_by_budget", "prompt_tokens", "completion_tokens", "active_seconds", "cached_input_tokens", "cache_observed_input_tokens", "cache_observed_calls", "image_budget_tokens", "image_input_tokens_estimated", "image_count"), row))
+            row = self.conn.execute("SELECT used,denied,blocked,prompt_tokens,completion_tokens,active_seconds,cached_input_tokens,cache_observed_input_tokens,cache_observed_calls,image_budget_tokens,image_input_tokens_estimated,image_count,image_requests FROM budget WHERE run_id=?", (run_id,)).fetchone() or (0,) * 13
+        return dict(zip(("tool_calls", "denied_calls", "blocked_by_budget", "prompt_tokens", "completion_tokens", "active_seconds", "cached_input_tokens", "cache_observed_input_tokens", "cache_observed_calls", "image_budget_tokens", "image_input_tokens_estimated", "image_count", "image_requests"), row))
 
     def reserve_images(self, run_id, tokens, count, limit):
         # Conservative attempt charge: unknown/failed requests are not assumed free.
@@ -83,7 +83,7 @@ class RunStore:
             used = self.budget(run_id)['image_budget_tokens']
             if used + tokens > limit:
                 return False
-            db.execute("UPDATE budget SET image_budget_tokens=image_budget_tokens+?,image_count=image_count+? WHERE run_id=?", (tokens, count, run_id))
+            db.execute("UPDATE budget SET image_budget_tokens=image_budget_tokens+?,image_count=image_count+?,image_requests=image_requests+1 WHERE run_id=?", (tokens, count, run_id))
             return True
 
     def reserve(self, run_id, limit):

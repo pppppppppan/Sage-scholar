@@ -7,30 +7,87 @@ from sage_scholar.tools.base_tool import ToolCallError
 
 
 def invoke_tools(llm, messages, tools, *, tag, max_tokens=4096, temperature=0,
-                 final_schema=None, max_rounds=4, max_calls=12, images=None, finish_when=None):
+                 final_schema=None, max_rounds=4, max_calls=12, images=None, finish_when=None,
+                 vision_llm=None, defer_images=True, visual_state=None):
     history = deepcopy(messages)
     mapping = {t.name: t for t in tools}
     schemas = [t.to_schema() for t in tools]
     terminal = final_schema["function"]["name"] if final_schema else None
     if final_schema:
         schemas.append(final_schema)
+    if images and defer_images and tools:
+        history.append({"role": "user", "content":
+            "原图已选定，将在工具收集完成后的最终回答阶段提供。当前先加载需要的 Skill、"
+            "检索资料和定位证据；不要从图注猜测视觉细节。资料就绪时简短表示可以开始读图。"})
     used = 0
+    visual_state = visual_state if visual_state is not None else {}
+
+    def visual_answer():
+        check_control()
+        try:
+            response = (vision_llm or llm).invoke(messages=[*history, {"role": "user", "content":
+                "工具资料已收集完成。现在结合所附原图与工具结果回答原问题，遵守已加载的 Skill；"
+                "只对实际看到的原图描述视觉细节，不能把图注或工具摘要当作原图验证。"}],
+                tools=[final_schema] if final_schema else None,
+                tool_choice={"type": "function", "function": {"name": terminal}} if terminal else "none",
+                max_tokens=max_tokens, temperature=temperature, tag=tag, images=images)
+            check_control()
+            if not terminal and (response.tool_calls or not (response.content or "").strip()):
+                raise ToolCallError("最终视觉请求未返回有效答案")
+            return response
+        except (WorkflowInterrupted, ResearchBudgetReached):
+            raise
+        except Exception:
+            # Keep already acquired tool observations/Skill instructions. Do not
+            # restart the tool loop or pay for the same retrieval a second time.
+            visual_state["failed"] = True
+            response = llm.invoke(messages=[*history, {"role": "user", "content":
+                "视觉模型不可用。本次仅依据已获取的文字证据回答；图像内容尚未核验，"
+                "不得声称已看过原图或由图注猜测视觉细节。没有文字证据则明确资料不足。"}],
+                tools=[final_schema] if final_schema else None,
+                tool_choice={"type": "function", "function": {"name": terminal}} if terminal else "none",
+                max_tokens=max_tokens, temperature=temperature, tag=tag)
+            check_control()
+            if not terminal and (response.tool_calls or not (response.content or "").strip()):
+                raise ToolCallError("视觉降级后未返回有效文字答案")
+            return response
+
     for step in range(max_rounds + 1):
         check_control()
         final = step == max_rounds or used >= max_calls or bool(finish_when and finish_when())
         available = ([final_schema] if final_schema else None) if final else schemas
         choice = {"type": "function", "function": {"name": terminal}} if final_schema and final else ("none" if final else "auto")
-        response = llm.invoke(messages=history, tools=available, tool_choice=choice,
-            max_tokens=max_tokens, temperature=temperature, tag=tag, **({"images": images} if images else {}))
+        if images and final:
+            return visual_answer()
+        # Ordinary visual QA can finish in one request. Only that initial
+        # capability-discovery call may carry pixels; once tools are requested,
+        # all intermediate turns use text, followed by a real visual answer.
+        initial_visual = bool(images and step == 0 and (not defer_images or not tools))
+        if initial_visual:
+            try:
+                response = (vision_llm or llm).invoke(messages=history, tools=available, tool_choice=choice,
+                    max_tokens=max_tokens, temperature=temperature, tag=tag, images=images)
+            except (WorkflowInterrupted, ResearchBudgetReached):
+                raise
+            except Exception:
+                visual_state["failed"] = True
+                history.append({"role": "user", "content":
+                    "视觉模型不可用，仅使用文字证据；图像内容尚未核验，不得依据图注猜测视觉细节。"})
+                images = None
+                response = llm.invoke(messages=history, tools=available, tool_choice=choice,
+                    max_tokens=max_tokens, temperature=temperature, tag=tag)
+        else:
+            response = llm.invoke(messages=history, tools=available, tool_choice=choice,
+                max_tokens=max_tokens, temperature=temperature, tag=tag)
         check_control()
         calls = list(response.tool_calls or [])
         if not calls:
             if not (response.content or "").strip():
                 raise ValueError("模型返回空回答，未将任务标记为完成")
-            return response
+            return visual_answer() if images and not initial_visual else response
         # A structured submission cannot precede pending tool observations in the same batch.
         if terminal and len(calls) == 1 and calls[0].function.name == terminal:
-            return response
+            return visual_answer() if images and not initial_visual else response
         if final:
             raise ToolCallError("模型在工具预算结束后仍要求调用工具，未伪装任务完成")
         history.append({"role": "assistant", "content": response.content,

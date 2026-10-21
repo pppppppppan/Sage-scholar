@@ -81,11 +81,13 @@ class Pipeline:
         os.makedirs(os.path.join(data_dir, self.SEARCH_CACHE_DIR), exist_ok=True)
 
         store_path = os.path.join(data_dir, self.VECTOR_STORE_FILE)
-        self.vector_store = (
-            VectorStore.load_json(store_path)
-            if os.path.exists(store_path)
-            else VectorStore()
-        )
+        from pathlib import Path
+        from sage_scholar.infrastructure.json_store import file_lock
+        from sage_scholar.infrastructure.document_store import JsonDocumentStore
+        # Do not race startup reconciliation against another in-flight import.
+        with file_lock(Path(data_dir) / ".ingestion"):
+            self.vector_store = VectorStore.load_json(store_path) if os.path.exists(store_path) else VectorStore()
+            self.vector_store.reconcile_library(data_dir, JsonDocumentStore(data_dir).list(), save=self.save)
 
         if self.vector_store.chunks and self.vector_store.embedding_identity != self.embedding.identity:
             raise RuntimeError("已有向量索引与当前 Embedding 配置不兼容。请重新建立索引，不能混用不同模型的向量。")

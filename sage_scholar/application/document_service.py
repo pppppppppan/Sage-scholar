@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 
 from sage_scholar.library import LibraryManager
@@ -23,25 +24,31 @@ class DocumentService:
 
     async def ingest(self, source: str, custom_title: str | None = None, overwrite: bool = True, *,
                      document_id: str | None = None, source_identifier: str | None = None):
-        suffix = Path(source).suffix.lower()
-        if suffix in {".md", ".markdown", ".txt"}:
-            manager = await asyncio.to_thread(self._local_manager)
-            return await asyncio.to_thread(
-                manager.ingest,
-                source,
-                custom_title,
-                overwrite,
-                document_id=document_id, source_identifier=source_identifier,
-            )
-        capability = "pdf" if suffix == ".pdf" else "paper"
-        manager = await asyncio.to_thread(self._runtime_provider.get_library_manager, capability)
-        return await asyncio.to_thread(
-            manager.ingest,
-            source,
-            custom_title,
-            overwrite,
-            document_id=document_id, source_identifier=source_identifier,
-        )
+        cancelled = threading.Event()
+
+        def ingest():
+            suffix = Path(source).suffix.lower()
+            manager = self._local_manager() if suffix in {".md", ".markdown", ".txt"} else (
+                self._runtime_provider.get_library_manager("pdf" if suffix == ".pdf" else "paper"))
+            return manager.ingest(source, custom_title, overwrite, document_id=document_id,
+                                  source_identifier=source_identifier, cancelled=cancelled)
+
+        task = asyncio.create_task(asyncio.to_thread(ingest))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled.set()
+            # Wait until the worker reaches a safe boundary and finishes rollback.
+            # Repeated cancellation must not abandon a thread still writing indexes.
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except BaseException:
+                    if task.done():
+                        break
+            if not task.cancelled():
+                task.exception()
+            raise
 
     async def delete(self, title: str) -> None:
         manager = await asyncio.to_thread(self._local_manager)
