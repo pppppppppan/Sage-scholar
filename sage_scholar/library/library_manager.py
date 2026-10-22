@@ -161,7 +161,9 @@ class LibraryManager:
     def _status(self, doc, status):
         doc.ingestion_status = status
         doc.updated_at = utc_now()
-        self.store.put(doc)  # Short atomic catalog write; no parser/index work under this lock.
+        self.store.put(doc)  # Catalog remains the version authority.
+        if status == IngestionStatus.READY and hasattr(self.pipeline.vector_store, "bind_catalog"):
+            self.pipeline.vector_store.bind_catalog([doc])
 
     @staticmethod
     def _result(doc, status):

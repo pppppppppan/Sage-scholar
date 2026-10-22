@@ -119,11 +119,11 @@ def test_import_index_restart_retrieval_evidence_qa_and_idempotence(paper, pipel
     assert formula.evidence_id in result.citations.values()
     assert not result.citation_issues
     # Failed same-path rebuild cannot mutate the usable in-memory or disk index.
-    saved = Path(pipeline.data_dir, 'vector_store.json').read_bytes()
+    saved = [c.model_dump() for c in Pipeline(pipeline.data_dir).vector_store.chunks]
     restored.embedding.fail = True
     with pytest.raises(RuntimeError, match='embedding failure'):
         restored.add_document(doc.converted_path)
-    assert Path(pipeline.data_dir, 'vector_store.json').read_bytes() == saved
+    assert [c.model_dump() for c in Pipeline(pipeline.data_dir).vector_store.chunks] == saved
     assert [c.model_dump() for c in restored.vector_store.chunks] == before
     manager.delete_doc(doc.document_id)
     assert not manager.pipeline.vector_store.chunks

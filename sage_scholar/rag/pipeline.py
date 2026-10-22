@@ -2,7 +2,7 @@ import json
 import os
 from datetime import datetime
 
-from .vector_store import VectorStore
+from .persistent_store import open_index
 from .reranker import Reranker
 from .chunker import TextChunker
 from .embedding import Embedding
@@ -63,7 +63,7 @@ ingest_schema = {
 
 
 class Pipeline:
-    VECTOR_STORE_FILE = "vector_store.json"
+    VECTOR_STORE_FILE = "rag.sqlite3"
     DOCUMENTS_DIR = "documents"
     SEARCH_CACHE_DIR = "search_cache"
 
@@ -86,8 +86,10 @@ class Pipeline:
         from sage_scholar.infrastructure.document_store import JsonDocumentStore
         # Do not race startup reconciliation against another in-flight import.
         with file_lock(Path(data_dir) / ".ingestion"):
-            self.vector_store = VectorStore.load_json(store_path) if os.path.exists(store_path) else VectorStore()
-            self.vector_store.reconcile_library(data_dir, JsonDocumentStore(data_dir).list(), save=self.save)
+            self.vector_store = open_index(store_path, os.path.join(data_dir, "vector_store.json"))
+            documents = JsonDocumentStore(data_dir).list()
+            self.vector_store.reconcile_library(data_dir, documents, save=self.save)
+            self.vector_store.bind_catalog(documents)
 
         if self.vector_store.chunks and self.vector_store.embedding_identity != self.embedding.identity:
             raise RuntimeError("已有向量索引与当前 Embedding 配置不兼容。请重新建立索引，不能混用不同模型的向量。")
@@ -108,7 +110,7 @@ class Pipeline:
             raise ValueError("文档没有可索引文本或 Embedding 数量不匹配，保留旧索引")
         if len({len(vector) for vector in embedding_list}) != 1 or not embedding_list[0]:
             raise ValueError("Embedding 返回不一致的维度，保留旧索引")
-        previous_dimension = next((len(c.embedding) for c in self.vector_store.chunks if c.embedding), None)
+        previous_dimension = self.vector_store.dimension
         if previous_dimension and previous_dimension != len(embedding_list[0]):
             raise ValueError("Embedding 维度发生变化，不能混用旧索引")
         for ebd, chunk in zip(embedding_list, chunks):
@@ -129,8 +131,7 @@ class Pipeline:
         self.add_document(file_path)
 
     def save(self):
-        store_path = os.path.join(self.data_dir, self.VECTOR_STORE_FILE)
-        self.vector_store.save_to_json(store_path)
+        self.vector_store.save()
 
     def retrieve_chunks(
         self,
@@ -140,9 +141,7 @@ class Pipeline:
     ) -> list[tuple[Chunk, float]]:
         if not self.vector_store.chunks:
             return []
-        if allowed_file_paths is not None and not any(
-            chunk.file_path in allowed_file_paths for chunk in self.vector_store.chunks
-        ):
+        if allowed_file_paths is not None and not allowed_file_paths:
             return []
         if not self.mqe:
             query_embedding, query_tokens = self.embedding.invoke(query)

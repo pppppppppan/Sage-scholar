@@ -399,9 +399,46 @@ python -m sage_scholar.mcp.check --server tavily
 
 - 新 Chunk schema 为 `2`：保留 `section`、`page_start/page_end`、`element_type/element_id`、`metadata` 和 `parser_version`。PDF 坐标来自实际解析页；图注保存 Figure/Table label；表格按行分块并重复表头与表题，公式尽量携带紧邻变量解释。结构化来源信息传到检索与 Evidence，页面/图表和正文使用相同的文档版本及页码。
 - `RAG_CHUNK_TOKENS=480` 是分块目标，实际上限取它与当前 embedding 模型输入上限的较小值。本地使用模型自己的 tokenizer，包含 passage 前缀和特殊 token；未知远程 tokenizer 采用 UTF-8 字节保守计数，并用 `EMBEDDING_MAX_INPUT_TOKENS` 指定提供商限制。表头或单行超过限制时明确中止导入，不静默截断列、丢失表头或混入旧索引。
-- 向量 JSON 保存 envelope schema、index revision、parser versions 和全部 Chunk metadata。旧 list/envelope 格式兼容读取，旧 Chunk 记为 schema 1，未知页码保持 `None` 并记录迁移提示。未知 schema、向量模型/维度不匹配或 sidecar 内容校验错误会明确拒绝加载/更新。
+- 文本索引采用 SQLite schema 3（Chunk metadata/FTS5/向量备份）与 revision 命名的 FAISS 快照。旧 JSON 只作一次性迁移输入；旧 Chunk 的未知页码仍为 `None`。未知 schema、向量模型/维度不匹配或 sidecar 内容校验错误会明确拒绝加载/更新。
 - **旧文献不自动重算向量**。需要页码定位时，在文献库选中原文献重新上传原始 PDF（带原 `document_id`）；原文档身份不变，新解析作为新版本发布。不能先删除旧索引。新解析/embedding/保存失败时保留旧 active version；新索引准备完成后才替换同路径 chunks，避免重复。历史 Evidence 与文件继续保留用于原版本回读，删除文献后仍按现有 SourcePolicy 拒绝访问。
 - PyMuPDF 已列入基础依赖，不要求下载 Docling/视觉模型才能得到文字页码。若旧环境未安装它，或 PDF 无可靠文本层，则保留 pdfmux 转换文字、披露无法定位页码；已有结构化版本重建遇到此类错误时保留旧版本。复杂扫描/OCR 和无法可靠恢复的公式/表格仍应回读原图核验。
 - 无证据普通 QA 仅在授权文献/历史报告或已选 Skill 存在时进入补充工具路径。普通补查最多一次；检查引用的 Skill 可按既有工具预算继续读历史报告。最终仍无原始证据则返回资料不足，诊断型 Skill 仅能报告 `unverifiable`，不能输出无依据科研结论。
 
 相关回归测试：`tests/test_seven_structured_rag.py`、`tests/test_seven_visual_qa.py`、`tests/test_seven_mcp_skills.py`、`tests/test_seven_externalization.py`。测试使用真实生成 PDF、本地 SQLite/索引以及 Fake 模型/MCP；不调用收费模型。
+
+
+## 持久化 Hybrid RAG 与 Eval
+
+正式文本检索链：SQLite FTS5 BM25 + FAISS cosine → 原有 RRF → 原有 CrossEncoder → Evidence。查询不再重新创建 BM25，也不再用 Python 逐个计算向量相似度。中文问题仍使用原多语言 E5 query/passage 对齐；中文分词参与 FTS，英文召回不受中文词项硬过滤。PDF 视觉索引及上层 QA/Research 不变。
+
+- `data/rag.sqlite3` schema 3 是权威：保存稳定 Chunk ID、Document/version 关联、原页码/章节/Figure/Table metadata、float32 向量及 FTS。
+- `data/rag-faiss-{revision}.index` 是派生快照，位置映射到 SQLite 稳定行 ID。默认 `<2048` Chunk 用 FlatIP 精确搜索，更多用 HNSW(M32)，无需训练；`RAG_HNSW_THRESHOLD` 可配置。`FAISS_NUM_THREADS=1` 默认控制线程数。
+- SourcePolicy 的允许路径在 FTS SQL 和 FAISS selector 中筛选，返回前再检查；旧版本保留，活动检索仍由 Catalog 选择。
+- FTS/metadata 使用事务增量更新；FAISS 当前在写入时重建。先写临时 FAISS、fsync/rename，再提交 SQLite revision/hash。读请求不会重建，快照丢失/损坏时仅从已保存向量恢复，不再解析 PDF 或调用 Embedding。
+- 沿用 `.ingestion` 锁和 Catalog 恢复规则：失败/取消回滚，Catalog 全部合法历史版本保留；仅删除未提交的文献库 staging Chunk，不删 search_cache 等其他索引。回滚写盘失败保留原始异常并在下次启动/导入重试。
+
+### 旧索引迁移
+
+先停止旧后端，再安装更新后的 requirements（新增 `faiss-cpu`），启动时会自动迁移；也可离线执行：
+
+```bash
+conda activate deep-research
+cd /Users/pan/Desktop/1/sage-scholar
+python -m pip install -r requirements.txt
+python -m sage_scholar.rag.migrate --data-dir ./data
+./setup.sh
+```
+
+迁移从 `vector_store.json` 读取旧 schema 1/2，暂存 SQLite/FAISS，发布 SQLite 后才生效；原 JSON 不改动，作为备份保留。新库已存在时不再重导旧 JSON，避免删除的资料复活。迁移保留 Chunk/source 元数据和 Document 版本，Evidence ID 不因索引格式变化而重新生成；数值向量以 float32 保存。不支持的 schema/模型身份明确报错，不能静默混用。不要在旧后端仍运行时手动迁移或同时启动多个写进程。
+
+迁移不会自动为未知旧来源补造页码，也不重新处理所有 PDF。`VectorStore` 的旧实现仅用于迁移读取、历史兼容测试及新旧 benchmark，没有生产后端切换开关。
+
+### 离线 Eval
+
+```bash
+python -m evals run --suite all
+python -m evals run --suite deep_research --dataset /path/my-runs.jsonl --data-dir ./data
+python -m evals run --suite rag --live --dataset /path/my-rag.jsonl --data-dir ./data
+```
+
+支持 RAG、Router、Research、Citation Check、Skills，输出 JSON/Markdown 与 baseline 差异。默认 Fixture 不调用收费模型；`--live` / `--answers` / `--judge-model` 明确启用真实模型。没有 gold/人工评分的语义质量不填分数。详情、样本格式、真实 Run 回读及指标口径见 [Eval 使用说明](evals/README.md)，实测新旧对比见 [Benchmark 报告目录](evals/reports)。

@@ -1,0 +1,262 @@
+{
+  "schema": 1,
+  "seed": 42,
+  "machine": {
+    "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "cpus": 10
+  },
+  "embedding": {
+    "provider": "local",
+    "model": "intfloat/multilingual-e5-small",
+    "normalized": true,
+    "query_prefix": "query: ",
+    "document_prefix": "passage: "
+  },
+  "queries": [
+    {
+      "query": "学生轨迹蒸馏的教师反馈是什么？",
+      "topic": 0
+    },
+    {
+      "query": "流体力学边界条件变化时的泛化实验",
+      "topic": 1
+    },
+    {
+      "query": "反向 KL 散度目标函数",
+      "topic": 2
+    },
+    {
+      "query": "Table 2 accuracy Dataset Alpha",
+      "topic": 3
+    },
+    {
+      "query": "湍流验证不足和计算成本局限",
+      "topic": 4
+    },
+    {
+      "query": "Figure 3 encoder decoder architecture",
+      "topic": 5
+    }
+  ],
+  "corpus_sha256": "b2921ad7d6b06f58e71d1b785428f5446a28e4d43ff0bd5d8bd450f3703aaa8e",
+  "method": "Synthetic topic corpus with multilingual queries. Gold is all chunks in the known topic. Query timing includes query embedding, hybrid retrieval, RRF and same reranker. Corpus embedding is precomputed identically and excluded from index build. RSS includes Python/models/index; cold index load uses a fresh object (OS cache not flushed). One isolated process per backend/size.",
+  "source_hashes": {
+    "sage_scholar/rag/vector_store.py": "b7f5f37a135c22b432ae7be4131e981f54885581c661cf0736ae34de86483348",
+    "sage_scholar/rag/persistent_store.py": "91fc9620dfbe9d2c29a8bacd871cb8d62a5a2cb3a4dde32f8194e10b12b7e3df",
+    "sage_scholar/rag/pipeline.py": "8b6f266b952cfa8b9ac1c209adefc602c5d87a1a308c0ef4ed34aca02e47ce68",
+    "sage_scholar/rag/reranker.py": "7d0406b7181b5b109bb1aca93893ba37f770136ecbd1ff4ae4f9178b64a52b8c"
+  },
+  "results": [
+    {
+      "backend": "legacy",
+      "chunks": 128,
+      "dimension": 384,
+      "build_seconds": 0.025880458299070597,
+      "cold_index_load_seconds": 0.006979958154261112,
+      "query_mean_ms": 61.16706233782073,
+      "query_p95_ms": 123.15835384652019,
+      "hybrid_mean_ms": 3.094402840360999,
+      "index_bytes": 1583109,
+      "peak_process_rss_mb": 1093.109375,
+      "metrics": {
+        "recall@5": 0.1341991341991342,
+        "precision@5": 0.5666666666666667,
+        "mrr": 0.5833333333333334,
+        "ndcg": 0.5575318903744783
+      },
+      "mutations": {
+        "add_ms": 19.520082976669073,
+        "replace_ms": 20.077833905816078,
+        "version_switch_ms": 0.5641668103635311,
+        "delete_ms": 19.30545922368765
+      },
+      "query_latencies_ms": [
+        146.8759160488844,
+        52.00566723942757,
+        38.9355830848217,
+        37.02237503603101,
+        48.99358283728361,
+        43.16924978047609
+      ],
+      "reranker": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+      "faiss": "1.15.1",
+      "index_kind": "NoneType"
+    },
+    {
+      "backend": "new",
+      "chunks": 128,
+      "dimension": 384,
+      "build_seconds": 0.013973041903227568,
+      "cold_index_load_seconds": 0.0007548336870968342,
+      "query_mean_ms": 39.5059649211665,
+      "query_p95_ms": 51.120562362484634,
+      "hybrid_mean_ms": 0.7937150852133831,
+      "index_bytes": 743527,
+      "peak_process_rss_mb": 1248.328125,
+      "metrics": {
+        "recall@5": 0.23448773448773447,
+        "precision@5": 1.0,
+        "mrr": 1.0,
+        "ndcg": 1.0
+      },
+      "mutations": {
+        "add_ms": 1.1294158175587654,
+        "replace_ms": 0.8122911676764488,
+        "version_switch_ms": 0.5639167502522469,
+        "delete_ms": 0.6206659600138664
+      },
+      "query_latencies_ms": [
+        53.546333219856024,
+        43.843249790370464,
+        33.367165829986334,
+        35.205124877393246,
+        35.71654111146927,
+        35.35737469792366
+      ],
+      "reranker": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+      "faiss": "1.15.1",
+      "index_kind": "IndexFlatIP"
+    },
+    {
+      "backend": "legacy",
+      "chunks": 1024,
+      "dimension": 384,
+      "build_seconds": 0.2037250827997923,
+      "cold_index_load_seconds": 0.057913166005164385,
+      "query_mean_ms": 69.70256264321506,
+      "query_p95_ms": 78.79064651206136,
+      "hybrid_mean_ms": 24.01796526586016,
+      "index_bytes": 12656514,
+      "peak_process_rss_mb": 1296.140625,
+      "metrics": {
+        "recall@5": 0.017578259373925008,
+        "precision@5": 0.6,
+        "mrr": 0.575,
+        "ndcg": 0.5680797508112316
+      },
+      "mutations": {
+        "add_ms": 155.32325021922588,
+        "replace_ms": 153.88600016012788,
+        "version_switch_ms": 0.7779169827699661,
+        "delete_ms": 154.04250007122755
+      },
+      "query_latencies_ms": [
+        78.9085840806365,
+        78.43683380633593,
+        64.07729210332036,
+        62.56383331492543,
+        71.56733283773065,
+        62.661499716341496
+      ],
+      "reranker": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+      "faiss": "1.15.1",
+      "index_kind": "NoneType"
+    },
+    {
+      "backend": "new",
+      "chunks": 1024,
+      "dimension": 384,
+      "build_seconds": 0.0976936249062419,
+      "cold_index_load_seconds": 0.0018909587524831295,
+      "query_mean_ms": 39.99349311925471,
+      "query_p95_ms": 50.1001353841275,
+      "hybrid_mean_ms": 0.929701142013073,
+      "index_bytes": 4336055,
+      "peak_process_rss_mb": 1264.609375,
+      "metrics": {
+        "recall@5": 0.02929709895654168,
+        "precision@5": 1.0,
+        "mrr": 1.0,
+        "ndcg": 1.0
+      },
+      "mutations": {
+        "add_ms": 3.0964999459683895,
+        "replace_ms": 2.4795830249786377,
+        "version_switch_ms": 0.7309578359127045,
+        "delete_ms": 2.4587921798229218
+      },
+      "query_latencies_ms": [
+        52.2967497818172,
+        43.5102921910584,
+        35.18108278512955,
+        35.03179224207997,
+        39.478749968111515,
+        34.46229174733162
+      ],
+      "reranker": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+      "faiss": "1.15.1",
+      "index_kind": "IndexFlatIP"
+    },
+    {
+      "backend": "legacy",
+      "chunks": 4096,
+      "dimension": 384,
+      "build_seconds": 0.8148640841245651,
+      "cold_index_load_seconds": 0.23641687538474798,
+      "query_mean_ms": 141.8489028389255,
+      "query_p95_ms": 149.34333390556276,
+      "hybrid_mean_ms": 95.77211124512057,
+      "index_bytes": 50628315,
+      "peak_process_rss_mb": 1397.8125,
+      "metrics": {
+        "recall@5": 0.004150154069863133,
+        "precision@5": 0.5666666666666667,
+        "mrr": 0.5416666666666666,
+        "ndcg": 0.5462122378925081
+      },
+      "mutations": {
+        "add_ms": 620.1025838963687,
+        "replace_ms": 619.8651250451803,
+        "version_switch_ms": 1.4467081055045128,
+        "delete_ms": 613.4536671452224
+      },
+      "query_latencies_ms": [
+        149.3917922489345,
+        149.1979588754475,
+        135.647542309016,
+        137.92729191482067,
+        144.62204091250896,
+        134.30679077282548
+      ],
+      "reranker": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+      "faiss": "1.15.1",
+      "index_kind": "NoneType"
+    },
+    {
+      "backend": "new",
+      "chunks": 4096,
+      "dimension": 384,
+      "build_seconds": 0.5465289168059826,
+      "cold_index_load_seconds": 0.006307207979261875,
+      "query_mean_ms": 40.48954866205653,
+      "query_p95_ms": 50.42952101211995,
+      "hybrid_mean_ms": 1.435124936203162,
+      "index_bytes": 17440788,
+      "peak_process_rss_mb": 1348.265625,
+      "metrics": {
+        "recall@5": 0.007324222244167458,
+        "precision@5": 1.0,
+        "mrr": 1.0,
+        "ndcg": 1.0
+      },
+      "mutations": {
+        "add_ms": 112.19808319583535,
+        "replace_ms": 115.33325025811791,
+        "version_switch_ms": 1.5547913499176502,
+        "delete_ms": 111.71808326616883
+      },
+      "query_latencies_ms": [
+        52.66287503764033,
+        43.729458935558796,
+        36.30504198372364,
+        36.76158282905817,
+        37.36662492156029,
+        36.111708264797926
+      ],
+      "reranker": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+      "faiss": "1.15.1",
+      "index_kind": "IndexHNSWFlat"
+    }
+  ]
+}

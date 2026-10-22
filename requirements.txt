@@ -22,3 +22,6 @@ langgraph-checkpoint-sqlite>=3.1,<4
 
 # PDF text structure/page provenance (also shared by optional visual retrieval).
 PyMuPDF>=1.26,<2
+
+# Local persistent dense retrieval
+faiss-cpu>=1.12,<2

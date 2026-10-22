@@ -138,6 +138,9 @@ class VectorStore:
             "embedding_identity": self.embedding_identity, "chunks": chunk_dicts})
         self.cleanup_pending = False
 
+    def indexed_paths(self):
+        return {c.file_path for c in self.chunks}
+
     def reconcile_library(self, data_dir, documents, *, save):
         """Remove only uncommitted library-owned paths, under the ingestion lock.
 
@@ -164,7 +167,7 @@ class VectorStore:
                     and bool(re.fullmatch(r"[0-9a-f]{32}", parts[1])))
 
         with self.lock:
-            paths = {c.file_path for c in self.chunks if orphan(c.file_path)}
+            paths = {path for path in self.indexed_paths() if orphan(path)}
             for path in paths:
                 self.remove_by_filepath(path)
             if paths or self.cleanup_pending:

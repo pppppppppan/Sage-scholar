@@ -1,6 +1,8 @@
-"""Real JSON indexes/catalogs and PDF parsing; no remote embeddings or MCP."""
+"""Real SQLite/FAISS indexes, JSON catalogs and PDF parsing; no remote embeddings or MCP."""
 import asyncio
 import subprocess
+import sqlite3
+import json
 import sys
 import threading
 from pathlib import Path
@@ -33,7 +35,12 @@ def paths(store):
 
 
 def disk(pipeline):
-    return VectorStore.load_json(str(Path(pipeline.data_dir) / pipeline.VECTOR_STORE_FILE))
+    from sage_scholar.rag.persistent_store import PersistentStore
+    path = Path(pipeline.data_dir) / pipeline.VECTOR_STORE_FILE
+    with sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True) as db:
+        chunks = [PersistentStore.decode(row) for row in db.execute('SELECT payload,vector FROM chunks ORDER BY id')]
+        revision = json.loads(db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0])
+        return SimpleNamespace(chunks=chunks, index_revision=revision)
 
 
 def seed(pipeline, tmp_path):
@@ -97,6 +104,7 @@ def test_failed_rollback_does_not_mask_error_and_retries_on_restart(pipeline, pa
     assert paths(pipeline.vector_store) == before and pipeline.vector_store.cleanup_pending
     assert paths(disk(pipeline)) > before
     if recovery == "restart":
+        pipeline.vector_store.close()  # Simulate process death: discard uncommitted cleanup transaction.
         restored = Pipeline(pipeline.data_dir)
         assert paths(restored.vector_store) == paths(disk(restored)) == before
         return
@@ -111,9 +119,9 @@ def test_actual_process_exit_leaves_orphan_then_pipeline_startup_recovers(pipeli
     orphan = str(Path(pipeline.data_dir) / 'converted' / doc_id / ('a' * 32) / 'document.md')
     # No Python finally/exception handler runs in this child.
     code = '''import os,sys
-from sage_scholar.rag.vector_store import VectorStore
+from sage_scholar.rag.persistent_store import PersistentStore
 from sage_scholar.rag.document import Chunk
-s=VectorStore.load_json(sys.argv[1])
+s=PersistentStore(sys.argv[1])
 s.replace_file(sys.argv[2], [Chunk(file_path=sys.argv[2], chunk_idx=0, content='uncommitted', tokens=['uncommitted'], embedding=[1.,0.])], save_path=sys.argv[1])
 os._exit(19)
 '''
