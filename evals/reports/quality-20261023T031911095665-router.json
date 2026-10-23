@@ -1,0 +1,618 @@
+{
+  "code_version": {
+    "commit": "41067492c167b2297963304efd10db9ee06cab6e",
+    "dirty": true,
+    "source_sha256": "c4fad14f3fbe3d8bf76a3fcef75c9c41571d9467d6a5d89c26829c881ddf7e8b"
+  },
+  "schema_version": 2,
+  "created_at": "2026-10-23T03:19:11.072740+00:00",
+  "seed": 42,
+  "dataset_hashes": {
+    "evals/datasets/gold/router.jsonl": "e34ae3a138ef11d1082b3d879d1a4dcc60a43de7ad9c3f605abf1248702d8c90"
+  },
+  "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+  "config": {
+    "command": "run",
+    "suite": "router",
+    "dataset": "evals/datasets/gold/router.jsonl",
+    "data_dir": null,
+    "output": "eval-results",
+    "baseline": null,
+    "gate": null,
+    "skill_ablation": false,
+    "allow_paid": false,
+    "seed": 42,
+    "k": 5,
+    "answers": false,
+    "live": true,
+    "judge_model": null,
+    "judge_base_url": null
+  },
+  "prompt_hashes": {
+    "sage_scholar/routing/classifier.py": "371869bbdc8323a974a06b32d40180751d56233e035b61238e23463ff75a07af",
+    "sage_scholar/agents/supervisor.py": "a11f83a5ae2402510c8bc97574d74d01c6993da5ff2d3c7da87aaae7d2559f83",
+    "sage_scholar/agents/__init__.py": "653512025c9bba018ef402158e2a4e630036d6d3804543db39db89ed340a0696",
+    "sage_scholar/agents/writer.py": "aff30f5213786537893f18ba18a0bc155cea6a50f40225b72bdf87234658eb3b",
+    "sage_scholar/agents/researcher.py": "612da74d06d73c1ef581ac3d33b45232aeab463f90ceb725648bbedbe1a9d5fb",
+    "skills/paper-review/SKILL.md": "017d3156949eaf1b82d751ab723ddd565deb1c0714b4e34c99be0e5e807fb87c",
+    "skills/citation-check/SKILL.md": "cc412eb3bdb7e2917498bc7eca6b0e86b935d89d157ad25adebe9d2e82e4a43d"
+  },
+  "summary": {
+    "router": {
+      "metrics": {
+        "active_seconds": {
+          "mean": 2.0868167500787727,
+          "n": 6
+        },
+        "allow_web_accuracy": {
+          "mean": 0.75,
+          "n": 4
+        },
+        "completion_tokens": {
+          "mean": 55.166666666666664,
+          "n": 6
+        },
+        "document_ids_accuracy": {
+          "mean": 1.0,
+          "n": 2
+        },
+        "latency_ms": {
+          "mean": 2087.6829100307077,
+          "n": 6
+        },
+        "prompt_tokens": {
+          "mean": 1050.6666666666667,
+          "n": 6
+        },
+        "source_policy_accuracy": {
+          "mean": 0.75,
+          "n": 4
+        },
+        "source_scope_accuracy": {
+          "mean": 1.0,
+          "n": 5
+        },
+        "tool_calls": {
+          "mean": 0,
+          "n": 6
+        },
+        "workflow_accuracy": {
+          "mean": 0.5,
+          "n": 6
+        }
+      },
+      "samples": 6,
+      "execution_errors": 0,
+      "classification": {
+        "accuracy": 0.5,
+        "confusion_matrix": {
+          "clarify": {
+            "clarify": 0,
+            "deep_research": 0,
+            "direct": 0,
+            "qa": 0
+          },
+          "deep_research": {
+            "clarify": 2,
+            "deep_research": 1,
+            "direct": 0,
+            "qa": 0
+          },
+          "direct": {
+            "clarify": 1,
+            "deep_research": 0,
+            "direct": 0,
+            "qa": 0
+          },
+          "qa": {
+            "clarify": 0,
+            "deep_research": 0,
+            "direct": 0,
+            "qa": 2
+          }
+        },
+        "per_label": {
+          "clarify": {
+            "precision": 0.0,
+            "recall": 0,
+            "f1": 0,
+            "support": 0
+          },
+          "deep_research": {
+            "precision": 1.0,
+            "recall": 0.3333333333333333,
+            "f1": 0.5,
+            "support": 3
+          },
+          "direct": {
+            "precision": 0,
+            "recall": 0.0,
+            "f1": 0,
+            "support": 1
+          },
+          "qa": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 2
+          }
+        }
+      }
+    }
+  },
+  "samples": [
+    {
+      "suite": "router",
+      "id": "intent-router-1",
+      "sample": {
+        "query": "你好",
+        "expected": {
+          "workflow": "direct",
+          "source_scope": "conversation",
+          "allow_web": false
+        },
+        "route_input": {},
+        "id": "intent-router-1",
+        "suite": "router",
+        "dataset_version": "intent-gold-1",
+        "provenance": {
+          "kind": "behavior_gold",
+          "basis": "Explicit query/source restrictions, no model prediction used"
+        },
+        "annotation": {
+          "status": "verified",
+          "reviewer": "codex",
+          "method": "requirement_checked",
+          "basis": "Query and explicit route_input"
+        }
+      },
+      "evaluated": true,
+      "mode": "live",
+      "observed": {
+        "workflow": "clarify",
+        "source_scope": "conversation",
+        "document_ids": [],
+        "allow_web": false,
+        "execution_mode": "run",
+        "needs_clarification": true,
+        "clarification_message": "你好，请问有什么可以帮您？",
+        "reason_code": "semantic_clarify",
+        "confidence": 0.98,
+        "tool_calls": 0,
+        "denied_calls": 0,
+        "blocked_by_budget": 0,
+        "prompt_tokens": 1043,
+        "completion_tokens": 48,
+        "active_seconds": 4.747229000087827,
+        "cached_input_tokens": 0,
+        "cache_observed_input_tokens": 0,
+        "cache_observed_calls": 0,
+        "image_budget_tokens": 0,
+        "image_input_tokens_estimated": 0,
+        "image_count": 0,
+        "image_requests": 0,
+        "latency_ms": 4748.918458819389,
+        "model": "qwen3.5:2b",
+        "model_config": {
+          "timeout": 60.0,
+          "confidence_threshold": 0.65
+        },
+        "annotations": {}
+      },
+      "metrics": {
+        "workflow_accuracy": 0.0,
+        "source_scope_accuracy": 1.0,
+        "allow_web_accuracy": 1.0,
+        "source_policy_accuracy": 1.0,
+        "latency_ms": 4748.918458819389,
+        "prompt_tokens": 1043,
+        "completion_tokens": 48,
+        "tool_calls": 0,
+        "active_seconds": 4.747229000087827
+      },
+      "errors": [
+        "workflow_accuracy"
+      ],
+      "evaluation_ms": 5114.0029998496175
+    },
+    {
+      "suite": "router",
+      "id": "intent-router-2",
+      "sample": {
+        "query": "帮我调研 OPD",
+        "expected": {
+          "workflow": "deep_research",
+          "source_scope": "public",
+          "allow_web": true
+        },
+        "route_input": {},
+        "id": "intent-router-2",
+        "suite": "router",
+        "dataset_version": "intent-gold-1",
+        "provenance": {
+          "kind": "behavior_gold",
+          "basis": "Explicit query/source restrictions, no model prediction used"
+        },
+        "annotation": {
+          "status": "verified",
+          "reviewer": "codex",
+          "method": "requirement_checked",
+          "basis": "Query and explicit route_input"
+        }
+      },
+      "evaluated": true,
+      "mode": "live",
+      "observed": {
+        "workflow": "deep_research",
+        "source_scope": "public",
+        "document_ids": [],
+        "allow_web": true,
+        "execution_mode": "run",
+        "needs_clarification": false,
+        "clarification_message": null,
+        "reason_code": "local_semantic",
+        "confidence": 0.98,
+        "tool_calls": 0,
+        "denied_calls": 0,
+        "blocked_by_budget": 0,
+        "prompt_tokens": 1046,
+        "completion_tokens": 43,
+        "active_seconds": 1.4466273332946002,
+        "cached_input_tokens": 0,
+        "cache_observed_input_tokens": 0,
+        "cache_observed_calls": 0,
+        "image_budget_tokens": 0,
+        "image_input_tokens_estimated": 0,
+        "image_count": 0,
+        "image_requests": 0,
+        "latency_ms": 1447.4290409125388,
+        "model": "qwen3.5:2b",
+        "model_config": {
+          "timeout": 60.0,
+          "confidence_threshold": 0.65
+        },
+        "annotations": {}
+      },
+      "metrics": {
+        "workflow_accuracy": 1.0,
+        "source_scope_accuracy": 1.0,
+        "allow_web_accuracy": 1.0,
+        "source_policy_accuracy": 1.0,
+        "latency_ms": 1447.4290409125388,
+        "prompt_tokens": 1046,
+        "completion_tokens": 43,
+        "tool_calls": 0,
+        "active_seconds": 1.4466273332946002
+      },
+      "errors": [],
+      "evaluation_ms": 1452.9809160158038
+    },
+    {
+      "suite": "router",
+      "id": "intent-router-3",
+      "sample": {
+        "query": "这篇论文的数据集是什么",
+        "expected": {
+          "workflow": "qa",
+          "source_scope": "selected_documents",
+          "document_ids": [
+            "p1"
+          ]
+        },
+        "route_input": {
+          "document_ids": [
+            "p1"
+          ]
+        },
+        "id": "intent-router-3",
+        "suite": "router",
+        "dataset_version": "intent-gold-1",
+        "provenance": {
+          "kind": "behavior_gold",
+          "basis": "Explicit query/source restrictions, no model prediction used"
+        },
+        "annotation": {
+          "status": "verified",
+          "reviewer": "codex",
+          "method": "requirement_checked",
+          "basis": "Query and explicit route_input"
+        }
+      },
+      "evaluated": true,
+      "mode": "live",
+      "observed": {
+        "workflow": "qa",
+        "source_scope": "selected_documents",
+        "document_ids": [
+          "p1"
+        ],
+        "allow_web": false,
+        "execution_mode": "run",
+        "needs_clarification": false,
+        "clarification_message": null,
+        "reason_code": "local_semantic",
+        "confidence": 0.98,
+        "tool_calls": 0,
+        "denied_calls": 0,
+        "blocked_by_budget": 0,
+        "prompt_tokens": 1050,
+        "completion_tokens": 40,
+        "active_seconds": 1.0562306670472026,
+        "cached_input_tokens": 0,
+        "cache_observed_input_tokens": 0,
+        "cache_observed_calls": 0,
+        "image_budget_tokens": 0,
+        "image_input_tokens_estimated": 0,
+        "image_count": 0,
+        "image_requests": 0,
+        "latency_ms": 1056.8629172630608,
+        "model": "qwen3.5:2b",
+        "model_config": {
+          "timeout": 60.0,
+          "confidence_threshold": 0.65
+        },
+        "annotations": {}
+      },
+      "metrics": {
+        "workflow_accuracy": 1.0,
+        "source_scope_accuracy": 1.0,
+        "document_ids_accuracy": 1.0,
+        "latency_ms": 1056.8629172630608,
+        "prompt_tokens": 1050,
+        "completion_tokens": 40,
+        "tool_calls": 0,
+        "active_seconds": 1.0562306670472026
+      },
+      "errors": [],
+      "evaluation_ms": 1064.8792078718543
+    },
+    {
+      "suite": "router",
+      "id": "intent-router-4",
+      "sample": {
+        "query": "只用本地文献调研 OPD",
+        "expected": {
+          "workflow": "deep_research",
+          "source_scope": "workspace",
+          "allow_web": false
+        },
+        "route_input": {
+          "requested_scope": "workspace",
+          "allow_web": false
+        },
+        "id": "intent-router-4",
+        "suite": "router",
+        "dataset_version": "intent-gold-1",
+        "provenance": {
+          "kind": "behavior_gold",
+          "basis": "Explicit query/source restrictions, no model prediction used"
+        },
+        "annotation": {
+          "status": "verified",
+          "reviewer": "codex",
+          "method": "requirement_checked",
+          "basis": "Query and explicit route_input"
+        }
+      },
+      "evaluated": true,
+      "mode": "live",
+      "observed": {
+        "workflow": "clarify",
+        "source_scope": "workspace",
+        "document_ids": [],
+        "allow_web": false,
+        "execution_mode": "run",
+        "needs_clarification": true,
+        "clarification_message": "你想调研哪个主题？请提供具体的研究主题或论文名称。",
+        "reason_code": "semantic_clarify",
+        "confidence": 0.98,
+        "tool_calls": 0,
+        "denied_calls": 0,
+        "blocked_by_budget": 0,
+        "prompt_tokens": 1049,
+        "completion_tokens": 56,
+        "active_seconds": 1.440526916179806,
+        "cached_input_tokens": 0,
+        "cache_observed_input_tokens": 0,
+        "cache_observed_calls": 0,
+        "image_budget_tokens": 0,
+        "image_input_tokens_estimated": 0,
+        "image_count": 0,
+        "image_requests": 0,
+        "latency_ms": 1441.0255840048194,
+        "model": "qwen3.5:2b",
+        "model_config": {
+          "timeout": 60.0,
+          "confidence_threshold": 0.65
+        },
+        "annotations": {}
+      },
+      "metrics": {
+        "workflow_accuracy": 0.0,
+        "source_scope_accuracy": 1.0,
+        "allow_web_accuracy": 1.0,
+        "source_policy_accuracy": 1.0,
+        "latency_ms": 1441.0255840048194,
+        "prompt_tokens": 1049,
+        "completion_tokens": 56,
+        "tool_calls": 0,
+        "active_seconds": 1.440526916179806
+      },
+      "errors": [
+        "workflow_accuracy"
+      ],
+      "evaluation_ms": 1448.2017918489873
+    },
+    {
+      "suite": "router",
+      "id": "intent-router-5",
+      "sample": {
+        "query": "把这篇和公网方法比较",
+        "expected": {
+          "workflow": "deep_research",
+          "source_scope": "mixed",
+          "allow_web": true
+        },
+        "route_input": {
+          "document_ids": [
+            "p1"
+          ],
+          "requested_scope": "mixed"
+        },
+        "id": "intent-router-5",
+        "suite": "router",
+        "dataset_version": "intent-gold-1",
+        "provenance": {
+          "kind": "behavior_gold",
+          "basis": "Explicit query/source restrictions, no model prediction used"
+        },
+        "annotation": {
+          "status": "verified",
+          "reviewer": "codex",
+          "method": "requirement_checked",
+          "basis": "Query and explicit route_input"
+        }
+      },
+      "evaluated": true,
+      "mode": "live",
+      "observed": {
+        "workflow": "clarify",
+        "source_scope": "mixed",
+        "document_ids": [
+          "p1"
+        ],
+        "allow_web": false,
+        "execution_mode": "run",
+        "needs_clarification": true,
+        "clarification_message": "请提供要比较的两篇论文，并说明第一篇是选中的本地文档（p1），第二篇是公网方法。",
+        "reason_code": "semantic_clarify",
+        "confidence": 0.98,
+        "tool_calls": 0,
+        "denied_calls": 0,
+        "blocked_by_budget": 0,
+        "prompt_tokens": 1052,
+        "completion_tokens": 104,
+        "active_seconds": 2.6810802090913057,
+        "cached_input_tokens": 0,
+        "cache_observed_input_tokens": 0,
+        "cache_observed_calls": 0,
+        "image_budget_tokens": 0,
+        "image_input_tokens_estimated": 0,
+        "image_count": 0,
+        "image_requests": 0,
+        "latency_ms": 2682.2270420379937,
+        "model": "qwen3.5:2b",
+        "model_config": {
+          "timeout": 60.0,
+          "confidence_threshold": 0.65
+        },
+        "annotations": {}
+      },
+      "metrics": {
+        "workflow_accuracy": 0.0,
+        "source_scope_accuracy": 1.0,
+        "allow_web_accuracy": 0.0,
+        "source_policy_accuracy": 0.0,
+        "latency_ms": 2682.2270420379937,
+        "prompt_tokens": 1052,
+        "completion_tokens": 104,
+        "tool_calls": 0,
+        "active_seconds": 2.6810802090913057
+      },
+      "errors": [
+        "workflow_accuracy",
+        "allow_web_accuracy",
+        "source_policy_accuracy"
+      ],
+      "evaluation_ms": 2690.897709224373
+    },
+    {
+      "suite": "router",
+      "id": "intent-router-6",
+      "sample": {
+        "query": "它的实验呢",
+        "expected": {
+          "workflow": "qa",
+          "document_ids": [
+            "p1"
+          ]
+        },
+        "route_input": {
+          "document_ids": [
+            "p1"
+          ],
+          "history": [
+            {
+              "role": "user",
+              "content": "讨论 p1 论文"
+            }
+          ]
+        },
+        "id": "intent-router-6",
+        "suite": "router",
+        "dataset_version": "intent-gold-1",
+        "provenance": {
+          "kind": "behavior_gold",
+          "basis": "Explicit query/source restrictions, no model prediction used"
+        },
+        "annotation": {
+          "status": "verified",
+          "reviewer": "codex",
+          "method": "requirement_checked",
+          "basis": "Query and explicit route_input"
+        }
+      },
+      "evaluated": true,
+      "mode": "live",
+      "observed": {
+        "workflow": "qa",
+        "source_scope": "selected_documents",
+        "document_ids": [
+          "p1"
+        ],
+        "allow_web": false,
+        "execution_mode": "run",
+        "needs_clarification": false,
+        "clarification_message": null,
+        "reason_code": "local_semantic",
+        "confidence": 0.98,
+        "tool_calls": 0,
+        "denied_calls": 0,
+        "blocked_by_budget": 0,
+        "prompt_tokens": 1064,
+        "completion_tokens": 40,
+        "active_seconds": 1.149206374771893,
+        "cached_input_tokens": 0,
+        "cache_observed_input_tokens": 0,
+        "cache_observed_calls": 0,
+        "image_budget_tokens": 0,
+        "image_input_tokens_estimated": 0,
+        "image_count": 0,
+        "image_requests": 0,
+        "latency_ms": 1149.6344171464443,
+        "model": "qwen3.5:2b",
+        "model_config": {
+          "timeout": 60.0,
+          "confidence_threshold": 0.65
+        },
+        "annotations": {}
+      },
+      "metrics": {
+        "workflow_accuracy": 1.0,
+        "document_ids_accuracy": 1.0,
+        "latency_ms": 1149.6344171464443,
+        "prompt_tokens": 1064,
+        "completion_tokens": 40,
+        "tool_calls": 0,
+        "active_seconds": 1.149206374771893
+      },
+      "errors": [],
+      "evaluation_ms": 1168.6495416797698
+    }
+  ],
+  "interpretation": "Synthetic records test metric contracts, not current model accuracy. Missing semantic labels remain unassessed.",
+  "quality_gate": {
+    "status": "not_configured",
+    "rules": []
+  }
+}

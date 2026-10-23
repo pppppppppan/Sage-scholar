@@ -441,4 +441,14 @@ python -m evals run --suite deep_research --dataset /path/my-runs.jsonl --data-d
 python -m evals run --suite rag --live --dataset /path/my-rag.jsonl --data-dir ./data
 ```
 
-支持 RAG、Router、Research、Citation Check、Skills，输出 JSON/Markdown 与 baseline 差异。默认 Fixture 不调用收费模型；`--live` / `--answers` / `--judge-model` 明确启用真实模型。没有 gold/人工评分的语义质量不填分数。详情、样本格式、真实 Run 回读及指标口径见 [Eval 使用说明](evals/README.md)，实测新旧对比见 [Benchmark 报告目录](evals/reports)。
+支持 RAG、Router、Supervisor、Research、Citation Check、Skills，输出 JSON/Markdown 与 baseline 差异。默认 Fixture 不调用收费模型；`--live` / `--answers` / `--judge-model` 明确启用真实模型。没有 gold/人工评分的语义质量不填分数。详情、样本格式、真实 Run 回读及指标口径见 [Eval 使用说明](evals/README.md)，实测新旧对比见 [Benchmark 报告目录](evals/reports)。
+
+
+检索质量评测支持来源核对 Gold、真实模块执行、历史 Run 回读和 Quality Gate：
+
+```bash
+python -m evals run --suite all --gate evals/gate_configs/offline.json
+python -m evals validate --dataset evals/datasets/gold/rag.jsonl
+```
+
+Section 解析改为请求内按文档版本复用；Reranker 懒加载并支持多语言模型配置及 RRF 降级。当前保留旧模型默认：BGE 权重下载失败，尚无真实对照分数。模型配置、实际结果、可选付费评测和 CI 门禁说明见 [Eval 文档](evals/README.md)。

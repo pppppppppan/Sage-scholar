@@ -49,7 +49,7 @@ def test_all_offline_suites_run_without_models_and_write_reports(tmp_path,monkey
     import openai
     monkeypatch.setattr(openai,'OpenAI',lambda *a,**kw:pytest.fail('offline eval called model'))
     result=run(options(tmp_path))
-    assert set(result['summary'])=={'rag','router','deep_research','citations','skills'}
+    assert set(result['summary'])=={'rag','router','supervisor','deep_research','citations','skills'}
     assert len(result['samples'])>=20
     assert not any('error' in row for row in result['samples'])
     assert list((tmp_path/'reports').glob('*.md')) and list((tmp_path/'reports').glob('*.json'))

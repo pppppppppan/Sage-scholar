@@ -1,0 +1,74 @@
+[
+  {
+    "id": "attention",
+    "text": "Transformer attention computes softmax(QK^T / sqrt(d_k))V. Scaling the dot products counteracts small softmax gradients at large key dimensions.",
+    "url": "https://arxiv.org/html/1706.03762v7",
+    "section": "3.2.1",
+    "version": "1706.03762v7",
+    "content_kind": "source_checked_paraphrase"
+  },
+  {
+    "id": "ffn",
+    "text": "The position-wise Transformer feed-forward layer uses two affine transformations separated by ReLU; the inner width is 2048 for the base configuration.",
+    "url": "https://arxiv.org/html/1706.03762v7",
+    "section": "3.3",
+    "version": "1706.03762v7",
+    "content_kind": "source_checked_paraphrase"
+  },
+  {
+    "id": "position",
+    "text": "Transformer adds sinusoidal positional signals to token embeddings. Learned positional embeddings gave similar development results in the comparison.",
+    "url": "https://arxiv.org/html/1706.03762v7",
+    "section": "3.5; Table 3 row E",
+    "version": "1706.03762v7",
+    "content_kind": "source_checked_paraphrase"
+  },
+  {
+    "id": "training",
+    "text": "The Transformer used WMT 2014 English-German data with approximately 4.5 million sentence pairs, and English-French with 36 million pairs.",
+    "url": "https://arxiv.org/html/1706.03762v7",
+    "section": "5.1",
+    "version": "1706.03762v7",
+    "content_kind": "source_checked_paraphrase"
+  },
+  {
+    "id": "metric",
+    "text": "For English-German translation, Transformer big achieved 28.4 BLEU on newstest2014. This is a translation metric, not classification accuracy.",
+    "url": "https://arxiv.org/html/1706.03762v7",
+    "section": "6.1; Table 2",
+    "version": "1706.03762v7",
+    "content_kind": "source_checked_paraphrase"
+  },
+  {
+    "id": "ablation",
+    "text": "The Transformer head-count ablation found one head worse than the best setting by 0.9 BLEU; excessive heads also reduced quality.",
+    "url": "https://arxiv.org/html/1706.03762v7",
+    "section": "6.2; Table 3 row A",
+    "version": "1706.03762v7",
+    "content_kind": "source_checked_paraphrase"
+  },
+  {
+    "id": "lora-method",
+    "text": "LoRA adapts pretrained models by training low-rank decomposition matrices while keeping the original model weights fixed.",
+    "url": "https://arxiv.org/abs/2106.09685v2",
+    "section": "Abstract",
+    "version": "2106.09685v2",
+    "content_kind": "source_checked_paraphrase"
+  },
+  {
+    "id": "lora-cost",
+    "text": "For GPT-3 175B compared with Adam full fine-tuning, LoRA reports 10,000-fold fewer trainable parameters and threefold lower GPU memory requirements.",
+    "url": "https://arxiv.org/abs/2106.09685v2",
+    "section": "Abstract",
+    "version": "2106.09685v2",
+    "content_kind": "source_checked_paraphrase"
+  },
+  {
+    "id": "lora-latency",
+    "text": "Unlike adapters, LoRA reports no added inference latency. The experiments include RoBERTa, DeBERTa, GPT-2 and GPT-3.",
+    "url": "https://arxiv.org/abs/2106.09685v2",
+    "section": "Abstract",
+    "version": "2106.09685v2",
+    "content_kind": "source_checked_paraphrase"
+  }
+]

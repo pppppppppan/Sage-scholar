@@ -1,0 +1,5 @@
+{"rules":[
+ {"suite":"rag","metric":"mrr","min":0.8,"min_samples":6,"modes":["synthetic_index_execution"]},
+ {"suite":"router","metric":"workflow_accuracy","min":1,"min_samples":6,"modes":["router_contract_fixture"]},
+ {"suite":"supervisor","metric":"task_count_within_gold_limit","min":1,"min_samples":5,"modes":["supervisor_contract_fixture"]}
+]}

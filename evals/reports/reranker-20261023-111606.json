@@ -1,0 +1,482 @@
+{
+  "created_at": "2026-10-23T03:16:06.198411+00:00",
+  "code_version": {
+    "commit": "41067492c167b2297963304efd10db9ee06cab6e",
+    "dirty": true,
+    "source_sha256": "71cc06aa2405f3522f7c853757760957cf7ad427023b7df6dfac72d297c24de5"
+  },
+  "dataset_sha256": "4e7acf261063c970bb3a9e8f2490dd9f20275f03f14996814861a7773fe87c7a",
+  "method": "Identical candidate passages; strict real CrossEncoder, no RRF fallback; CPU thread count 1. Warm query scores not cached. RSS includes interpreter/model. Gold is source-checked paraphrase passages, not full PDF.",
+  "results": [
+    {
+      "status": "measured",
+      "config": {
+        "model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        "device": "cpu",
+        "batch_size": 8,
+        "max_length": 512,
+        "revision": null,
+        "local_only": true,
+        "fallback": "raise",
+        "cache_size": 0,
+        "retry_seconds": 60
+      },
+      "resolved_revision": "233902d25c440f23af6f7d6e94d2946bac0bee0a",
+      "cold_load_and_first_query_ms": 3667.6791249774396,
+      "summary": {
+        "all": {
+          "recall@3": 0.8571428571428571,
+          "precision@3": 0.2857142857142857,
+          "mrr": 0.8095238095238095,
+          "ndcg": 0.8214285714285714,
+          "n": 14,
+          "latency_ms": 27.245776860841683
+        },
+        "English": {
+          "recall@3": 1.0,
+          "precision@3": 0.3333333333333333,
+          "mrr": 1.0,
+          "ndcg": 1.0,
+          "n": 7,
+          "latency_ms": 25.655458282147134
+        },
+        "中文": {
+          "recall@3": 0.7142857142857143,
+          "precision@3": 0.23809523809523808,
+          "mrr": 0.6190476190476191,
+          "ndcg": 0.6428571428571429,
+          "n": 7,
+          "latency_ms": 28.83609543953623
+        }
+      },
+      "samples": [
+        {
+          "id": "paper-1",
+          "language": "中文",
+          "candidates": [
+            "attention",
+            "ffn",
+            "position",
+            "training",
+            "metric",
+            "ablation",
+            "lora-method",
+            "lora-cost",
+            "lora-latency"
+          ],
+          "predicted": [
+            "attention",
+            "training",
+            "ffn"
+          ],
+          "gold": {
+            "attention": 2
+          },
+          "metrics": {
+            "recall@3": 1.0,
+            "precision@3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg": 1.0
+          },
+          "latency_ms": 28.675457928329706
+        },
+        {
+          "id": "paper-2",
+          "language": "English",
+          "candidates": [
+            "attention",
+            "ffn",
+            "position",
+            "training",
+            "metric",
+            "ablation",
+            "lora-method",
+            "lora-cost",
+            "lora-latency"
+          ],
+          "predicted": [
+            "attention",
+            "ffn",
+            "position"
+          ],
+          "gold": {
+            "attention": 2
+          },
+          "metrics": {
+            "recall@3": 1.0,
+            "precision@3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg": 1.0
+          },
+          "latency_ms": 25.350125040858984
+        },
+        {
+          "id": "paper-3",
+          "language": "中文",
+          "candidates": [
+            "attention",
+            "ffn",
+            "position",
+            "training",
+            "metric",
+            "ablation",
+            "lora-method",
+            "lora-cost",
+            "lora-latency"
+          ],
+          "predicted": [
+            "position",
+            "training",
+            "ablation"
+          ],
+          "gold": {
+            "ffn": 2
+          },
+          "metrics": {
+            "recall@3": 0.0,
+            "precision@3": 0.0,
+            "mrr": 0,
+            "ndcg": 0.0
+          },
+          "latency_ms": 26.050375308841467
+        },
+        {
+          "id": "paper-4",
+          "language": "English",
+          "candidates": [
+            "attention",
+            "ffn",
+            "position",
+            "training",
+            "metric",
+            "ablation",
+            "lora-method",
+            "lora-cost",
+            "lora-latency"
+          ],
+          "predicted": [
+            "ffn",
+            "position",
+            "attention"
+          ],
+          "gold": {
+            "ffn": 2
+          },
+          "metrics": {
+            "recall@3": 1.0,
+            "precision@3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg": 1.0
+          },
+          "latency_ms": 26.449790690094233
+        },
+        {
+          "id": "paper-5",
+          "language": "中文",
+          "candidates": [
+            "attention",
+            "ffn",
+            "position",
+            "training",
+            "metric",
+            "ablation",
+            "lora-method",
+            "lora-cost",
+            "lora-latency"
+          ],
+          "predicted": [
+            "ffn",
+            "ablation",
+            "training"
+          ],
+          "gold": {
+            "position": 2
+          },
+          "metrics": {
+            "recall@3": 0.0,
+            "precision@3": 0.0,
+            "mrr": 0,
+            "ndcg": 0.0
+          },
+          "latency_ms": 30.936541967093945
+        },
+        {
+          "id": "paper-6",
+          "language": "English",
+          "candidates": [
+            "attention",
+            "ffn",
+            "position",
+            "training",
+            "metric",
+            "ablation",
+            "lora-method",
+            "lora-cost",
+            "lora-latency"
+          ],
+          "predicted": [
+            "position",
+            "ffn",
+            "lora-method"
+          ],
+          "gold": {
+            "position": 2
+          },
+          "metrics": {
+            "recall@3": 1.0,
+            "precision@3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg": 1.0
+          },
+          "latency_ms": 26.222707703709602
+        },
+        {
+          "id": "paper-7",
+          "language": "中文",
+          "candidates": [
+            "attention",
+            "ffn",
+            "position",
+            "training",
+            "metric",
+            "ablation",
+            "lora-method",
+            "lora-cost",
+            "lora-latency"
+          ],
+          "predicted": [
+            "position",
+            "ablation",
+            "training"
+          ],
+          "gold": {
+            "training": 2
+          },
+          "metrics": {
+            "recall@3": 1.0,
+            "precision@3": 0.3333333333333333,
+            "mrr": 0.3333333333333333,
+            "ndcg": 0.5
+          },
+          "latency_ms": 26.97962522506714
+        },
+        {
+          "id": "paper-8",
+          "language": "English",
+          "candidates": [
+            "attention",
+            "ffn",
+            "position",
+            "training",
+            "metric",
+            "ablation",
+            "lora-method",
+            "lora-cost",
+            "lora-latency"
+          ],
+          "predicted": [
+            "metric",
+            "training",
+            "ablation"
+          ],
+          "gold": {
+            "metric": 2
+          },
+          "metrics": {
+            "recall@3": 1.0,
+            "precision@3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg": 1.0
+          },
+          "latency_ms": 27.18604216352105
+        },
+        {
+          "id": "paper-9",
+          "language": "中文",
+          "candidates": [
+            "attention",
+            "ffn",
+            "position",
+            "training",
+            "metric",
+            "ablation",
+            "lora-method",
+            "lora-cost",
+            "lora-latency"
+          ],
+          "predicted": [
+            "ablation",
+            "metric",
+            "ffn"
+          ],
+          "gold": {
+            "ablation": 2
+          },
+          "metrics": {
+            "recall@3": 1.0,
+            "precision@3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg": 1.0
+          },
+          "latency_ms": 30.407459009438753
+        },
+        {
+          "id": "paper-10",
+          "language": "English",
+          "candidates": [
+            "attention",
+            "ffn",
+            "position",
+            "training",
+            "metric",
+            "ablation",
+            "lora-method",
+            "lora-cost",
+            "lora-latency"
+          ],
+          "predicted": [
+            "ablation",
+            "attention",
+            "lora-latency"
+          ],
+          "gold": {
+            "ablation": 2
+          },
+          "metrics": {
+            "recall@3": 1.0,
+            "precision@3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg": 1.0
+          },
+          "latency_ms": 24.828583002090454
+        },
+        {
+          "id": "paper-11",
+          "language": "中文",
+          "candidates": [
+            "attention",
+            "ffn",
+            "position",
+            "training",
+            "metric",
+            "ablation",
+            "lora-method",
+            "lora-cost",
+            "lora-latency"
+          ],
+          "predicted": [
+            "lora-method",
+            "lora-latency",
+            "lora-cost"
+          ],
+          "gold": {
+            "lora-method": 2
+          },
+          "metrics": {
+            "recall@3": 1.0,
+            "precision@3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg": 1.0
+          },
+          "latency_ms": 26.283624581992626
+        },
+        {
+          "id": "paper-12",
+          "language": "English",
+          "candidates": [
+            "attention",
+            "ffn",
+            "position",
+            "training",
+            "metric",
+            "ablation",
+            "lora-method",
+            "lora-cost",
+            "lora-latency"
+          ],
+          "predicted": [
+            "lora-method",
+            "lora-cost",
+            "lora-latency"
+          ],
+          "gold": {
+            "lora-method": 2
+          },
+          "metrics": {
+            "recall@3": 1.0,
+            "precision@3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg": 1.0
+          },
+          "latency_ms": 23.761417251080275
+        },
+        {
+          "id": "paper-13",
+          "language": "中文",
+          "candidates": [
+            "attention",
+            "ffn",
+            "position",
+            "training",
+            "metric",
+            "ablation",
+            "lora-method",
+            "lora-cost",
+            "lora-latency"
+          ],
+          "predicted": [
+            "lora-cost",
+            "lora-latency",
+            "lora-method"
+          ],
+          "gold": {
+            "lora-cost": 2
+          },
+          "metrics": {
+            "recall@3": 1.0,
+            "precision@3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg": 1.0
+          },
+          "latency_ms": 32.51958405598998
+        },
+        {
+          "id": "paper-14",
+          "language": "English",
+          "candidates": [
+            "attention",
+            "ffn",
+            "position",
+            "training",
+            "metric",
+            "ablation",
+            "lora-method",
+            "lora-cost",
+            "lora-latency"
+          ],
+          "predicted": [
+            "lora-latency",
+            "lora-method",
+            "lora-cost"
+          ],
+          "gold": {
+            "lora-latency": 2
+          },
+          "metrics": {
+            "recall@3": 1.0,
+            "precision@3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg": 1.0
+          },
+          "latency_ms": 25.789542123675346
+        }
+      ],
+      "peak_process_rss_mb": 625.9375
+    },
+    {
+      "model": "BAAI/bge-reranker-v2-m3",
+      "status": "unavailable",
+      "error": "ges/sentence_transformers/base/modules/transformer.py\", line 1836, in _load_model\n    return model_cls.from_pretrained(model_name_or_path, config=config, **model_kwargs)\n           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/miniconda3/envs/deep-research/lib/python3.14/site-packages/transformers/models/auto/auto_factory.py\", line 402, in from_pretrained\n    return model_class.from_pretrained(\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^\n        pretrained_model_name_or_path, *model_args, config=config, **hub_kwargs, **kwargs\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/opt/miniconda3/envs/deep-research/lib/python3.14/site-packages/transformers/modeling_utils.py\", line 4218, in from_pretrained\n    checkpoint_files, sharded_metadata = _get_resolved_checkpoint_files(\n                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^\n        pretrained_model_name_or_path=pretrained_model_name_or_path,\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<7 lines>...\n        tqdm_class=tqdm_class,\n        ^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/opt/miniconda3/envs/deep-research/lib/python3.14/site-packages/transformers/modeling_utils.py\", line 746, in _get_resolved_checkpoint_files\n    raise OSError(\n    ...<2 lines>...\n    )\nOSError: BAAI/bge-reranker-v2-m3 does not appear to have a file named pytorch_model.bin or model.safetensors.\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"/Users/pan/Desktop/1/sage-scholar/sage_scholar/rag/reranker.py\", line 90, in rerank\n    model = self._load()\n  File \"/Users/pan/Desktop/1/sage-scholar/sage_scholar/rag/reranker.py\", line 80, in _load\n    raise RerankerUnavailable(shared.failure) from exc\nsage_scholar.rag.reranker.RerankerUnavailable: BAAI/bge-reranker-v2-m3 on cpu: OSError: BAAI/bge-reranker-v2-m3 does not appear to have a file named pytorch_model.bin or model.safetensors.\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"<frozen runpy>\", line 203, in _run_module_as_main\n  File \"<frozen runpy>\", line 88, in _run_code\n  File \"/Users/pan/Desktop/1/sage-scholar/evals/runners/rerank.py\", line 90, in <module>\n    print(json.dumps(worker(json.loads(sys.argv[1])),ensure_ascii=False))\n                     ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/pan/Desktop/1/sage-scholar/evals/runners/rerank.py\", line 26, in worker\n    reranker.rerank(first['query'],chunks,spec['k'])\n    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/pan/Desktop/1/sage-scholar/sage_scholar/rag/reranker.py\", line 115, in rerank\n    raise RerankerUnavailable(str(exc)) from exc\nsage_scholar.rag.reranker.RerankerUnavailable: BAAI/bge-reranker-v2-m3 on cpu: OSError: BAAI/bge-reranker-v2-m3 does not appear to have a file named pytorch_model.bin or model.safetensors.\n"
+    }
+  ]
+}

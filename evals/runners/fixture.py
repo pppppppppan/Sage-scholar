@@ -57,3 +57,18 @@ def router(sample):
     result['latency_ms']=(time.perf_counter()-start)*1000
     result['model']='scripted-fixture (not qwen accuracy)'
     return result
+
+
+def supervisor(sample):
+    from types import SimpleNamespace
+    import json
+    from sage_scholar.agents.supervisor import Supervisor
+    from sage_scholar.domain.execution import ExecutionRequest
+    from sage_scholar.runtime.limits import execution_budget
+    class Scripted:
+        def invoke(self, **kwargs):
+            return SimpleNamespace(tool_calls=[],content=json.dumps(sample['scripted_plan']))
+    request=ExecutionRequest(query=sample['query'],workflow='deep_research',source_scope='public',
+        allow_web=True,execution_mode='run',budget=execution_budget('deep_research'))
+    tasks=Supervisor(Scripted(),8).plan(request)
+    return {'tasks':[task.model_dump() for task in tasks],'model':'scripted-contract-fixture'}

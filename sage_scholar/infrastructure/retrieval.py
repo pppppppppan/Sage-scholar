@@ -53,6 +53,8 @@ class LegacyRetrievalAdapter:
             return [], []
         # Restrict candidates before BM25/vector scoring, then defensively validate returned paths.
         results = self.pipeline.retrieve_chunks(query, top_k=top_k, allowed_file_paths=set(docs))
+        from sage_scholar.rag.sections import SectionLookup, version_key
+        sections = {}  # Lifetime is this permitted-document snapshot only.
         evidence = []
         for chunk, score in results:
             doc = docs.get(chunk.file_path)
@@ -60,21 +62,24 @@ class LegacyRetrievalAdapter:
                 continue
             item = self._chunk_evidence(doc, chunk, score)
             evidence.append(item)
-            # Read the containing section when the legacy chunk can be located unambiguously.
-            matching = [
-                section for section in self._sections(doc)
-                if re.sub(r"\s+", "", chunk.content) in re.sub(r"\s+", "", section.original_text)
-            ]
-            if len(matching) == 1 and matching[0].original_text != chunk.content:
-                evidence.append(matching[0])
+            key = version_key(doc)
+            if key not in sections:
+                sections[key] = SectionLookup(self._sections(doc))
+            containing = sections[key].containing(chunk)
+            if containing and containing.original_text != chunk.content:
+                evidence.append(containing)
         text = list({item.evidence_id: item for item in evidence}.values())
+        reranker = getattr(self.pipeline, "reranker", None)
+        status = getattr(reranker, "last_status", {})
+        retrieval_warnings = (["重排模型不可用，已使用融合检索排序。"]
+                              if status.get("state") == "fallback" else [])
         from sage_scholar.visual.demand import needs_visual
         if not needs_visual(query, mode=visual_mode, text_available=bool(text)):
-            return text, []
+            return text, retrieval_warnings
         images, warnings = self.visual.search(query, list(docs.values()), self.visual.config.max_images)
         # Different encoders have incomparable cosine scores. Fuse ranks, not vectors/scores.
         from sage_scholar.visual.fusion import fuse
-        return fuse(text, images, top_k + self.visual.config.max_images), warnings
+        return fuse(text, images, top_k + self.visual.config.max_images), retrieval_warnings + warnings
 
     async def read_documents(self, *, policy: SourcePolicy) -> list[EvidenceRef]:
         return await cooperative_thread(self.read_documents_sync, policy)
@@ -88,7 +93,7 @@ class LegacyRetrievalAdapter:
         parsed = Document.read_file(doc.converted_path)
         if parsed.elements is not None:
             return [self._chunk_evidence(doc, c) for c in self._section_groups(TextChunker(6000).chunk(parsed))]
-        text = Path(doc.converted_path).read_text(encoding="utf-8")
+        text = parsed.text
         headings = list(re.finditer(r"(?m)^#{1,6}\s+(.+)$", text))
         starts = sorted(set([0, *[match.start() for match in headings]]))
         titles = {match.start(): match.group(1) for match in headings}

@@ -1,0 +1,10 @@
+{"rules":[
+ {"suite":"rag","metric":"recall@5","min":0.8,"min_samples":10},
+ {"suite":"rag","metric":"mrr","min":0.7,"min_samples":10},
+ {"suite":"rag","metric":"ndcg","min":0.75,"min_samples":10},
+ {"suite":"router","metric":"workflow_accuracy","min":0.9,"min_samples":20,"required":false},
+ {"suite":"router","metric":"source_policy_accuracy","min":0.95,"min_samples":20,"required":false},
+ {"suite":"citations","metric":"classification.macro_f1","min":0.8,"min_samples":20,"required":false},
+ {"suite":"deep_research","metric":"task_coverage","min":0.8,"min_samples":10,"required":false},
+ {"suite":"supervisor","metric":"task_redundancy","max":0.2,"min_samples":10,"required":false}
+]}

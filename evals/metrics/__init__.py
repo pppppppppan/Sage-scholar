@@ -69,6 +69,9 @@ def evaluate(suite, sample, observed, k):
         for key in ('workflow','source_scope','allow_web','document_ids','referent'):
             if key in expected:
                 scores[key+'_accuracy'] = float(expected[key] == observed.get(key))
+        fields = [key for key in ('source_scope','allow_web','document_ids') if key in expected]
+        if {'source_scope','allow_web'} <= set(fields):
+            scores['source_policy_accuracy'] = float(all(expected[k] == observed.get(k) for k in fields))
         if 'unavailable' in expected:
             scores['unavailable_handling'] = float(expected['unavailable'] == observed.get('unavailable', False))
     elif suite == 'citations':
@@ -85,12 +88,12 @@ def evaluate(suite, sample, observed, k):
             if pair.get('method') != 'human' or not pair.get('rationale') or not pair.get('same_input'):
                 raise ValueError('Skill comparison requires an annotated same-input pair')
             scores['paired_quality_delta'] = pair['with_skill'] - pair['without_skill']
-    elif suite == 'deep_research':
+    elif suite in {'supervisor','deep_research'}:
         tasks = observed.get('tasks', [])
         notes = observed.get('notes', [])
         scores['task_count'] = len(tasks)
         if 'max_tasks' in expected:
-            scores['task_count_within_gold_limit'] = float(len(tasks) <= expected['max_tasks'])
+            scores['task_count_within_gold_limit'] = float(expected.get('min_tasks',1) <= len(tasks) <= expected['max_tasks'])
         if tasks:
             scores['exact_duplicate_task_rate'] = 1-len({t.get('objective','').strip() for t in tasks})/len(tasks)
         evidence_ids = {e['evidence_id'] for e in observed.get('evidence', [])}
