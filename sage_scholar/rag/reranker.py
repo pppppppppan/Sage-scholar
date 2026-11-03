@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class RerankerConfig:
-    model: str = field(default_factory=lambda: os.getenv('RERANKER_MODEL', BASELINE))
+    model: str = field(default_factory=lambda: os.getenv('RERANKER_MODEL', MULTILINGUAL))
     device: str = field(default_factory=lambda: os.getenv('RERANKER_DEVICE', 'cpu'))
     batch_size: int = field(default_factory=lambda: int(os.getenv('RERANKER_BATCH_SIZE', '8')))
     max_length: int = field(default_factory=lambda: int(os.getenv('RERANKER_MAX_LENGTH', '512')))

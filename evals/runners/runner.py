@@ -111,6 +111,9 @@ def run(args):
                        'n':sum(key in r['metrics'] for r in items)} for key in metric_names}
         summary[suite] = {'metrics':means,'samples':len(items),'execution_errors':sum('error' in r for r in items)}
         label = 'workflow' if suite=='router' else 'status' if suite=='citations' else None
+        if suite=='router':
+            from .router_diagnostics import summary as router_summary
+            summary[suite]['diagnostics'] = router_summary(items)
         if label:
             pairs=[(r['sample']['expected'][label],r['observed'].get(label,'missing')) for r in items
                    if label in r['sample'].get('expected',{}) and 'observed' in r and r.get('evaluated',True) and not r.get('error')]
@@ -121,6 +124,10 @@ def run(args):
         'seed':args.seed,'dataset_hashes':hashes,'platform':platform.platform(),
         'config':vars(args),'prompt_hashes':prompt_hashes(), 'summary':summary,'samples':rows,
         'interpretation':'Synthetic records test metric contracts, not current model accuracy. Missing semantic labels remain unassessed.'}
+    if args.live and 'router' in suites:
+        from sage_scholar.config import RouterConfig
+        from .router_diagnostics import environment
+        report['router_environment'] = environment(RouterConfig())
     baseline = None
     if args.baseline:
         baseline=json.loads(Path(args.baseline).read_text())
@@ -146,6 +153,8 @@ def run(args):
         lines += [f'## {suite}',f"Samples: {data['samples']}; execution errors: {data['execution_errors']}",
                   '| Metric | Mean | Labeled N |','|---|---:|---:|']
         lines += [f"| {key} | {v['mean']:.6f} | {v['n']} |" for key,v in data['metrics'].items()]
+        if 'diagnostics' in data:
+            lines += ['### Router diagnostics','```json',json.dumps(data['diagnostics'],ensure_ascii=False,indent=2),'```']
         if 'classification' in data:
             lines += ['```json',json.dumps(data['classification'],ensure_ascii=False,indent=2),'```']
     lines += ['## Error cases']+[f"- {r['suite']}/{r['id']}: {r.get('error') or r.get('errors')}" for r in rows if r.get('error') or r.get('errors')]
@@ -186,14 +195,17 @@ def live(suite,sample,args,retrieval=None):
             ledger=RunStore(directory)
             request=ExecutionRequest(query=sample['query'],workflow='direct',source_scope='conversation',allow_web=False,execution_mode='run',run_id='eval')
             start=time.perf_counter()
+            from sage_scholar.routing.diagnostics import capture
+            trace = {}
             try:
-                with run_control(RunControl(request,ledger,lambda:False)):
+                with capture() as trace, run_control(RunControl(request,ledger,lambda:False)):
                     router_config = RouterConfig()
                     result=QueryRouter(LocalClassifier(router_config)).route(sample['query'],**sample.get('route_input',{})).model_dump(mode='json')
             except RouterUnavailable as exc:
                 result={'unavailable':True,'error':str(exc)}
+            result['diagnostics'] = trace
             result.update(ledger.budget('eval'),latency_ms=(time.perf_counter()-start)*1000,
-                model=router_config.model, model_config={'timeout':router_config.timeout,'confidence_threshold':router_config.confidence_threshold})
+                model=router_config.model, model_config={'timeout':router_config.timeout,'confidence_threshold':router_config.confidence_threshold,'confidence_gate':getattr(router_config,'confidence_gate',True)})
             ledger.close()
             return result
     if suite=='rag':

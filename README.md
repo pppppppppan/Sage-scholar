@@ -72,15 +72,17 @@ flowchart TD
     S --> E
 ```
 
-## 本地语义 Router 与统一入口图（2026-10-12）
+## 本地语义 Router 与统一入口图
 
-- 默认通过本机 Ollama 的 `/api/chat` 使用 `qwen3.5:2b`，结构化输出 workflow、资料范围、文档 ID、联网需求、置信度和澄清问题。分类参考本轮问题、最近 6 条有限长度的对话、所选文档和最多 50 条文献目录；不会发送完整论文、Memory provenance 或研究工具输出。
+- 默认通过本机 Ollama 的 `/api/chat` 使用 `qwen3.5:2b`，单次结构化输出 workflow、来源意图、文档 ID、诊断置信度和澄清问题；SourceResolver 验证资料身份，PolicyValidator 生成最终权限。分类参考本轮问题、最近 6 条有限长度的对话、所选文档和最多 50 条文献目录；不会发送完整论文、Memory provenance 或研究工具输出。
 - 不再用关键词/正则决定 Direct、QA、Research。未勾选文档时由模型结合目录解析论文指代，文件名出现在句子里不会自动成为强制资料范围；仅保留明确“记住：…”命令的操作识别。服务端仍校验文档身份和 SourcePolicy，模型不能扩大显式文档范围或绕过 `allow_web=false`。
-- 分类服务只允许 loopback 地址，绕开环境代理。连接失败、超时或无效 JSON 会明确显示失败，可在修复部署后继续原任务；不会静默回退到云端或关键词。低置信度/缺少必要输入进入持久化 Clarify，最多 3 次澄清。
+- 分类服务只允许 loopback 地址，绕开环境代理。连接失败、超时或无效 JSON 会明确显示失败，可在修复部署后继续原任务；不会静默回退到云端或关键词。只有缺少必要对象、资料不可用或权限冲突等情况进入持久化 Clarify，最多 3 次澄清。默认关闭未经校准的 confidence 门禁，可通过 `ROUTER_CONFIDENCE_GATE=true` 做 A/B 测试。
 - `/api/queries` 对 Direct/QA 也返回 `202 accepted + run_id`；前端统一通过 Run/SSE 显示结果和停止按钮。等待用户期间保留同一 Run，刷新或重启后仍可回答。切换页面不取消任务。
 - 原 Research 内部算法保持不变。外层图 checkpoint 使用 `run_id` / `semantic-query-v1`，Research 子图私有状态使用 `run_id:research` / 原图结构；预算、工具记录、Evidence、研究笔记仍归属于同一个 Run。继续研究不会重新分类，也不会重新执行已完成的子题。删除 Run 会删除两份图 checkpoint。
 - 已持久化的旧 Research Run 继续按原图恢复；旧 Direct/QA 没有 checkpoint 的中断任务需重新开始，不能伪造恢复。Context Manager、Memory 和 Evidence 继续由原服务复用。
 - 本地分类 token 和耗时单独记入 `router` 阶段，并计入累计 Run 预算；不产生云端分类费用。回答、研究和后台 Memory 的模型配置不变。
+
+UI 选中项仅提供上下文，独立公网研究不会自动变成本地问答。`requested_scope` 是硬边界；`allow_web=false` 始终禁止联网，`true` 仅表示允许；文档 ID 必须可解析。详细设计、候选数据集口径及真实前后对比见 [Router V2 说明](evals/ROUTER_V2.md)。
 
 ### 部署并检查 Router
 
@@ -106,6 +108,7 @@ python -m sage_scholar.routing.check --query '帮我调研 On-Policy Distillatio
 ROUTER_BASE_URL=http://127.0.0.1:11434
 ROUTER_MODEL=qwen3.5:2b
 ROUTER_TIMEOUT=60
+ROUTER_CONFIDENCE_GATE=false
 ROUTER_CONFIDENCE_THRESHOLD=0.65
 ```
 
@@ -451,4 +454,4 @@ python -m evals run --suite all --gate evals/gate_configs/offline.json
 python -m evals validate --dataset evals/datasets/gold/rag.jsonl
 ```
 
-Section 解析改为请求内按文档版本复用；Reranker 懒加载并支持多语言模型配置及 RRF 降级。当前保留旧模型默认：BGE 权重下载失败，尚无真实对照分数。模型配置、实际结果、可选付费评测和 CI 门禁说明见 [Eval 文档](evals/README.md)。
+Section 解析改为请求内按文档版本复用；Reranker 懒加载并支持多语言模型配置及 RRF 降级。默认模型已统一为 `BAAI/bge-reranker-v2-m3`；MiniLM 仅保留为可选对照基线。小样本真实对照显示中文 MRR 提升，但 BGE 更慢、更占内存，不能外推为所有论文效果。模型配置、实际结果、可选付费评测和 CI 门禁说明见 [Eval 文档](evals/README.md)。

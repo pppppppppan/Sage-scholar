@@ -1,0 +1,31 @@
+{
+  "rules": [
+    {
+      "suite": "router",
+      "metric": "workflow_accuracy",
+      "min_delta": 0,
+      "min_samples": 40,
+      "modes": [
+        "live"
+      ]
+    },
+    {
+      "suite": "router",
+      "metric": "classification.macro_f1",
+      "min_delta": 0,
+      "min_samples": 40,
+      "modes": [
+        "live"
+      ]
+    },
+    {
+      "suite": "router",
+      "metric": "permission_violations",
+      "max": 0,
+      "min_samples": 40,
+      "modes": [
+        "live"
+      ]
+    }
+  ]
+}

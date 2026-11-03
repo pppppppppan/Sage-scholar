@@ -1,0 +1,1806 @@
+{
+  "full": {
+    "before": {
+      "workflow": {
+        "accuracy": 0.7638888888888888,
+        "confusion_matrix": {
+          "clarify": {
+            "clarify": 15,
+            "deep_research": 1,
+            "direct": 1,
+            "qa": 0
+          },
+          "deep_research": {
+            "clarify": 11,
+            "deep_research": 46,
+            "direct": 1,
+            "qa": 0
+          },
+          "direct": {
+            "clarify": 5,
+            "deep_research": 0,
+            "direct": 27,
+            "qa": 0
+          },
+          "qa": {
+            "clarify": 5,
+            "deep_research": 5,
+            "direct": 5,
+            "qa": 22
+          }
+        },
+        "per_label": {
+          "clarify": {
+            "precision": 0.4166666666666667,
+            "recall": 0.8823529411764706,
+            "f1": 0.5660377358490566,
+            "support": 17
+          },
+          "deep_research": {
+            "precision": 0.8846153846153846,
+            "recall": 0.7931034482758621,
+            "f1": 0.8363636363636363,
+            "support": 58
+          },
+          "direct": {
+            "precision": 0.7941176470588235,
+            "recall": 0.84375,
+            "f1": 0.8181818181818182,
+            "support": 32
+          },
+          "qa": {
+            "precision": 1.0,
+            "recall": 0.5945945945945946,
+            "f1": 0.7457627118644068,
+            "support": 37
+          }
+        }
+      },
+      "macro_f1": 0.7415864755647295,
+      "clarify": {
+        "precision": 0.4166666666666667,
+        "recall": 0.8823529411764706,
+        "f1": 0.5660377358490566,
+        "support": 17
+      },
+      "false_clarify_rate": 0.16535433070866143,
+      "false_clarify_denominator": 127,
+      "permission_violations": 0,
+      "latency_p50_ms": 1132.5403328519315,
+      "latency_p95_ms": 1679.927976732142,
+      "error_groups": {
+        "模型误判": [
+          {
+            "id": "sage-router-v2-001",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-007",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-009",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-014",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-034",
+            "fields": [
+              "workflow",
+              "source_scope"
+            ],
+            "scenario": "qa_selected"
+          },
+          {
+            "id": "sage-router-v2-041",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "qa_selected"
+          },
+          {
+            "id": "sage-router-v2-042",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "qa_selected"
+          },
+          {
+            "id": "sage-router-v2-053",
+            "fields": [
+              "workflow",
+              "source_scope"
+            ],
+            "scenario": "qa_compare"
+          },
+          {
+            "id": "sage-router-v2-056",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "qa_workspace"
+          },
+          {
+            "id": "sage-router-v2-057",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "qa_workspace"
+          },
+          {
+            "id": "sage-router-v2-058",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "qa_workspace"
+          },
+          {
+            "id": "sage-router-v2-059",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "qa_workspace"
+          },
+          {
+            "id": "sage-router-v2-060",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "qa_workspace"
+          },
+          {
+            "id": "sage-router-v2-063",
+            "fields": [
+              "workflow",
+              "source_scope"
+            ],
+            "scenario": "qa_workspace"
+          },
+          {
+            "id": "sage-router-v2-064",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "qa_workspace"
+          },
+          {
+            "id": "sage-router-v2-073",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "allow_web"
+            ],
+            "scenario": "research_public"
+          },
+          {
+            "id": "sage-router-v2-080",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "allow_web"
+            ],
+            "scenario": "research_public"
+          },
+          {
+            "id": "sage-router-v2-100",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "research_local_workspace"
+          },
+          {
+            "id": "sage-router-v2-104",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "research_local_workspace"
+          },
+          {
+            "id": "sage-router-v2-116",
+            "fields": [
+              "workflow",
+              "allow_web"
+            ],
+            "scenario": "research_mixed_workspace"
+          },
+          {
+            "id": "sage-router-v2-117",
+            "fields": [
+              "workflow",
+              "allow_web"
+            ],
+            "scenario": "research_mixed_workspace"
+          },
+          {
+            "id": "sage-router-v2-123",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "clarify_missing_referent"
+          },
+          {
+            "id": "sage-router-v2-133",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "policy_override"
+          },
+          {
+            "id": "sage-router-v2-137",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "policy_override"
+          },
+          {
+            "id": "sage-router-v2-141",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "allow_web"
+            ],
+            "scenario": "history_untrusted"
+          },
+          {
+            "id": "sage-router-v2-143",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "policy_override"
+          }
+        ],
+        "文档指代": [
+          {
+            "id": "sage-router-v2-028",
+            "fields": [
+              "workflow",
+              "document_ids"
+            ],
+            "scenario": "direct_context"
+          },
+          {
+            "id": "sage-router-v2-047",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "document_ids"
+            ],
+            "scenario": "qa_selected"
+          },
+          {
+            "id": "sage-router-v2-062",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "document_ids"
+            ],
+            "scenario": "qa_history"
+          },
+          {
+            "id": "sage-router-v2-085",
+            "fields": [
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "research_public_selected_conflict"
+          },
+          {
+            "id": "sage-router-v2-086",
+            "fields": [
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "research_public_selected_conflict"
+          },
+          {
+            "id": "sage-router-v2-087",
+            "fields": [
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "research_public_selected_conflict"
+          },
+          {
+            "id": "sage-router-v2-088",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "research_public_selected_conflict"
+          },
+          {
+            "id": "sage-router-v2-089",
+            "fields": [
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "research_public_selected_conflict"
+          },
+          {
+            "id": "sage-router-v2-090",
+            "fields": [
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "research_public_selected_conflict"
+          },
+          {
+            "id": "sage-router-v2-091",
+            "fields": [
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "research_public_selected_conflict"
+          },
+          {
+            "id": "sage-router-v2-092",
+            "fields": [
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "research_public_selected_conflict"
+          },
+          {
+            "id": "sage-router-v2-095",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "document_ids"
+            ],
+            "scenario": "research_local_selected"
+          },
+          {
+            "id": "sage-router-v2-134",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "document_ids"
+            ],
+            "scenario": "policy_override"
+          },
+          {
+            "id": "sage-router-v2-138",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "policy_override"
+          },
+          {
+            "id": "sage-router-v2-144",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "document_ids"
+            ],
+            "scenario": "policy_override"
+          }
+        ]
+      },
+      "label_caveat": "Router kit labels are candidate behavioral expectations, not independently adjudicated gold. Groups are diagnostic heuristics; disputed expectations require human review.",
+      "fields": {
+        "source_scope_accuracy": {
+          "mean": 0.84251968503937,
+          "n": 127
+        },
+        "allow_web_accuracy": {
+          "mean": 0.889763779527559,
+          "n": 127
+        },
+        "document_ids_accuracy": {
+          "mean": 0.8571428571428571,
+          "n": 105
+        },
+        "source_policy_accuracy": {
+          "mean": 0.8188976377952756,
+          "n": 127
+        }
+      }
+    },
+    "after": {
+      "workflow": {
+        "accuracy": 0.8958333333333334,
+        "confusion_matrix": {
+          "clarify": {
+            "clarify": 13,
+            "deep_research": 1,
+            "direct": 0,
+            "qa": 3
+          },
+          "deep_research": {
+            "clarify": 0,
+            "deep_research": 57,
+            "direct": 0,
+            "qa": 1
+          },
+          "direct": {
+            "clarify": 5,
+            "deep_research": 1,
+            "direct": 24,
+            "qa": 2
+          },
+          "qa": {
+            "clarify": 0,
+            "deep_research": 1,
+            "direct": 1,
+            "qa": 35
+          }
+        },
+        "per_label": {
+          "clarify": {
+            "precision": 0.7222222222222222,
+            "recall": 0.7647058823529411,
+            "f1": 0.7428571428571428,
+            "support": 17
+          },
+          "deep_research": {
+            "precision": 0.95,
+            "recall": 0.9827586206896551,
+            "f1": 0.9661016949152542,
+            "support": 58
+          },
+          "direct": {
+            "precision": 0.96,
+            "recall": 0.75,
+            "f1": 0.8421052631578947,
+            "support": 32
+          },
+          "qa": {
+            "precision": 0.8536585365853658,
+            "recall": 0.9459459459459459,
+            "f1": 0.8974358974358975,
+            "support": 37
+          }
+        }
+      },
+      "macro_f1": 0.8621249995915473,
+      "clarify": {
+        "precision": 0.7222222222222222,
+        "recall": 0.7647058823529411,
+        "f1": 0.7428571428571428,
+        "support": 17
+      },
+      "false_clarify_rate": 0.03937007874015748,
+      "false_clarify_denominator": 127,
+      "permission_violations": 0,
+      "latency_p50_ms": 1894.419958582148,
+      "latency_p95_ms": 2595.0975891901176,
+      "error_groups": {
+        "模型误判": [
+          {
+            "id": "sage-router-v2-003",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-005",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-009",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-016",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-017",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "allow_web"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-018",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-060",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "qa_workspace"
+          },
+          {
+            "id": "sage-router-v2-064",
+            "fields": [
+              "workflow",
+              "source_scope"
+            ],
+            "scenario": "qa_workspace"
+          },
+          {
+            "id": "sage-router-v2-095",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "research_local_selected"
+          },
+          {
+            "id": "sage-router-v2-121",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "clarify_missing_referent"
+          },
+          {
+            "id": "sage-router-v2-122",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "clarify_missing_referent"
+          },
+          {
+            "id": "sage-router-v2-123",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "clarify_missing_referent"
+          },
+          {
+            "id": "sage-router-v2-125",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "clarify_missing_referent"
+          }
+        ],
+        "文档指代": [
+          {
+            "id": "sage-router-v2-022",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "document_ids"
+            ],
+            "scenario": "direct_context"
+          },
+          {
+            "id": "sage-router-v2-028",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "document_ids"
+            ],
+            "scenario": "direct_context"
+          }
+        ]
+      },
+      "label_caveat": "Router kit labels are candidate behavioral expectations, not independently adjudicated gold. Groups are diagnostic heuristics; disputed expectations require human review.",
+      "fields": {
+        "source_scope_accuracy": {
+          "mean": 0.968503937007874,
+          "n": 127
+        },
+        "allow_web_accuracy": {
+          "mean": 0.9921259842519685,
+          "n": 127
+        },
+        "document_ids_accuracy": {
+          "mean": 0.9809523809523809,
+          "n": 105
+        },
+        "source_policy_accuracy": {
+          "mean": 0.968503937007874,
+          "n": 127
+        }
+      }
+    }
+  },
+  "holdout": {
+    "before": {
+      "workflow": {
+        "accuracy": 0.7857142857142857,
+        "confusion_matrix": {
+          "clarify": {
+            "clarify": 4,
+            "deep_research": 0,
+            "direct": 0,
+            "qa": 0
+          },
+          "deep_research": {
+            "clarify": 3,
+            "deep_research": 9,
+            "direct": 1,
+            "qa": 0
+          },
+          "direct": {
+            "clarify": 2,
+            "deep_research": 0,
+            "direct": 13,
+            "qa": 0
+          },
+          "qa": {
+            "clarify": 0,
+            "deep_research": 2,
+            "direct": 1,
+            "qa": 7
+          }
+        },
+        "per_label": {
+          "clarify": {
+            "precision": 0.4444444444444444,
+            "recall": 1.0,
+            "f1": 0.6153846153846153,
+            "support": 4
+          },
+          "deep_research": {
+            "precision": 0.8181818181818182,
+            "recall": 0.6923076923076923,
+            "f1": 0.7500000000000001,
+            "support": 13
+          },
+          "direct": {
+            "precision": 0.8666666666666667,
+            "recall": 0.8666666666666667,
+            "f1": 0.8666666666666667,
+            "support": 15
+          },
+          "qa": {
+            "precision": 1.0,
+            "recall": 0.7,
+            "f1": 0.8235294117647058,
+            "support": 10
+          }
+        }
+      },
+      "macro_f1": 0.7638951734539969,
+      "clarify": {
+        "precision": 0.4444444444444444,
+        "recall": 1.0,
+        "f1": 0.6153846153846153,
+        "support": 4
+      },
+      "false_clarify_rate": 0.13157894736842105,
+      "false_clarify_denominator": 38,
+      "permission_violations": 0,
+      "latency_p50_ms": 1062.5769374892116,
+      "latency_p95_ms": 1672.4685807479534,
+      "error_groups": {
+        "模型误判": [
+          {
+            "id": "sage-router-v2-009",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-041",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "qa_selected"
+          },
+          {
+            "id": "sage-router-v2-058",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "qa_workspace"
+          },
+          {
+            "id": "sage-router-v2-063",
+            "fields": [
+              "workflow",
+              "source_scope"
+            ],
+            "scenario": "qa_workspace"
+          },
+          {
+            "id": "sage-router-v2-073",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "allow_web"
+            ],
+            "scenario": "research_public"
+          },
+          {
+            "id": "sage-router-v2-137",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "policy_override"
+          }
+        ],
+        "文档指代": [
+          {
+            "id": "sage-router-v2-028",
+            "fields": [
+              "workflow",
+              "document_ids"
+            ],
+            "scenario": "direct_context"
+          },
+          {
+            "id": "sage-router-v2-090",
+            "fields": [
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "research_public_selected_conflict"
+          },
+          {
+            "id": "sage-router-v2-092",
+            "fields": [
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "research_public_selected_conflict"
+          },
+          {
+            "id": "sage-router-v2-095",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "document_ids"
+            ],
+            "scenario": "research_local_selected"
+          },
+          {
+            "id": "sage-router-v2-138",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "policy_override"
+          }
+        ]
+      },
+      "label_caveat": "Router kit labels are candidate behavioral expectations, not independently adjudicated gold. Groups are diagnostic heuristics; disputed expectations require human review.",
+      "fields": {
+        "source_scope_accuracy": {
+          "mean": 0.8421052631578947,
+          "n": 38
+        },
+        "allow_web_accuracy": {
+          "mean": 0.8947368421052632,
+          "n": 38
+        },
+        "document_ids_accuracy": {
+          "mean": 0.8529411764705882,
+          "n": 34
+        },
+        "source_policy_accuracy": {
+          "mean": 0.8157894736842105,
+          "n": 38
+        }
+      }
+    },
+    "after": {
+      "workflow": {
+        "accuracy": 0.8095238095238095,
+        "confusion_matrix": {
+          "clarify": {
+            "clarify": 3,
+            "deep_research": 1,
+            "direct": 0,
+            "qa": 0
+          },
+          "deep_research": {
+            "clarify": 0,
+            "deep_research": 12,
+            "direct": 0,
+            "qa": 1
+          },
+          "direct": {
+            "clarify": 4,
+            "deep_research": 1,
+            "direct": 9,
+            "qa": 1
+          },
+          "qa": {
+            "clarify": 0,
+            "deep_research": 0,
+            "direct": 0,
+            "qa": 10
+          }
+        },
+        "per_label": {
+          "clarify": {
+            "precision": 0.42857142857142855,
+            "recall": 0.75,
+            "f1": 0.5454545454545454,
+            "support": 4
+          },
+          "deep_research": {
+            "precision": 0.8571428571428571,
+            "recall": 0.9230769230769231,
+            "f1": 0.888888888888889,
+            "support": 13
+          },
+          "direct": {
+            "precision": 1.0,
+            "recall": 0.6,
+            "f1": 0.7499999999999999,
+            "support": 15
+          },
+          "qa": {
+            "precision": 0.8333333333333334,
+            "recall": 1.0,
+            "f1": 0.9090909090909091,
+            "support": 10
+          }
+        }
+      },
+      "macro_f1": 0.7733585858585859,
+      "clarify": {
+        "precision": 0.42857142857142855,
+        "recall": 0.75,
+        "f1": 0.5454545454545454,
+        "support": 4
+      },
+      "false_clarify_rate": 0.10526315789473684,
+      "false_clarify_denominator": 38,
+      "permission_violations": 0,
+      "latency_p50_ms": 1839.4568332005292,
+      "latency_p95_ms": 2543.4265539515754,
+      "error_groups": {
+        "模型误判": [
+          {
+            "id": "sage-router-v2-005",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-009",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-016",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-017",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "allow_web"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-018",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-095",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "research_local_selected"
+          },
+          {
+            "id": "sage-router-v2-125",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "clarify_missing_referent"
+          }
+        ],
+        "文档指代": [
+          {
+            "id": "sage-router-v2-028",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "document_ids"
+            ],
+            "scenario": "direct_context"
+          }
+        ]
+      },
+      "label_caveat": "Router kit labels are candidate behavioral expectations, not independently adjudicated gold. Groups are diagnostic heuristics; disputed expectations require human review.",
+      "fields": {
+        "source_scope_accuracy": {
+          "mean": 0.9473684210526315,
+          "n": 38
+        },
+        "allow_web_accuracy": {
+          "mean": 0.9736842105263158,
+          "n": 38
+        },
+        "document_ids_accuracy": {
+          "mean": 0.9705882352941176,
+          "n": 34
+        },
+        "source_policy_accuracy": {
+          "mean": 0.9473684210526315,
+          "n": 38
+        }
+      }
+    }
+  },
+  "smoke": {
+    "before": {
+      "workflow": {
+        "accuracy": 0.7380952380952381,
+        "confusion_matrix": {
+          "clarify": {
+            "clarify": 6,
+            "deep_research": 0,
+            "direct": 0,
+            "qa": 0
+          },
+          "deep_research": {
+            "clarify": 5,
+            "deep_research": 13,
+            "direct": 0,
+            "qa": 0
+          },
+          "direct": {
+            "clarify": 1,
+            "deep_research": 0,
+            "direct": 5,
+            "qa": 0
+          },
+          "qa": {
+            "clarify": 2,
+            "deep_research": 1,
+            "direct": 2,
+            "qa": 7
+          }
+        },
+        "per_label": {
+          "clarify": {
+            "precision": 0.42857142857142855,
+            "recall": 1.0,
+            "f1": 0.6,
+            "support": 6
+          },
+          "deep_research": {
+            "precision": 0.9285714285714286,
+            "recall": 0.7222222222222222,
+            "f1": 0.8125000000000001,
+            "support": 18
+          },
+          "direct": {
+            "precision": 0.7142857142857143,
+            "recall": 0.8333333333333334,
+            "f1": 0.7692307692307692,
+            "support": 6
+          },
+          "qa": {
+            "precision": 1.0,
+            "recall": 0.5833333333333334,
+            "f1": 0.7368421052631579,
+            "support": 12
+          }
+        }
+      },
+      "macro_f1": 0.7296432186234818,
+      "clarify": {
+        "precision": 0.42857142857142855,
+        "recall": 1.0,
+        "f1": 0.6,
+        "support": 6
+      },
+      "false_clarify_rate": 0.2222222222222222,
+      "false_clarify_denominator": 36,
+      "permission_violations": 0,
+      "latency_p50_ms": 1138.9532501343638,
+      "latency_p95_ms": 1645.9639920853074,
+      "error_groups": {
+        "模型误判": [
+          {
+            "id": "sage-router-v2-001",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-034",
+            "fields": [
+              "workflow",
+              "source_scope"
+            ],
+            "scenario": "qa_selected"
+          },
+          {
+            "id": "sage-router-v2-056",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "qa_workspace"
+          },
+          {
+            "id": "sage-router-v2-057",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "qa_workspace"
+          },
+          {
+            "id": "sage-router-v2-100",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "research_local_workspace"
+          },
+          {
+            "id": "sage-router-v2-116",
+            "fields": [
+              "workflow",
+              "allow_web"
+            ],
+            "scenario": "research_mixed_workspace"
+          },
+          {
+            "id": "sage-router-v2-133",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "policy_override"
+          },
+          {
+            "id": "sage-router-v2-141",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "allow_web"
+            ],
+            "scenario": "history_untrusted"
+          }
+        ],
+        "文档指代": [
+          {
+            "id": "sage-router-v2-062",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "document_ids"
+            ],
+            "scenario": "qa_history"
+          },
+          {
+            "id": "sage-router-v2-085",
+            "fields": [
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "research_public_selected_conflict"
+          },
+          {
+            "id": "sage-router-v2-086",
+            "fields": [
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "research_public_selected_conflict"
+          },
+          {
+            "id": "sage-router-v2-087",
+            "fields": [
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "research_public_selected_conflict"
+          },
+          {
+            "id": "sage-router-v2-088",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "allow_web",
+              "document_ids"
+            ],
+            "scenario": "research_public_selected_conflict"
+          },
+          {
+            "id": "sage-router-v2-134",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "document_ids"
+            ],
+            "scenario": "policy_override"
+          }
+        ]
+      },
+      "label_caveat": "Router kit labels are candidate behavioral expectations, not independently adjudicated gold. Groups are diagnostic heuristics; disputed expectations require human review.",
+      "fields": {
+        "source_scope_accuracy": {
+          "mean": 0.7777777777777778,
+          "n": 36
+        },
+        "allow_web_accuracy": {
+          "mean": 0.8333333333333334,
+          "n": 36
+        },
+        "document_ids_accuracy": {
+          "mean": 0.7931034482758621,
+          "n": 29
+        },
+        "source_policy_accuracy": {
+          "mean": 0.75,
+          "n": 36
+        }
+      }
+    },
+    "after": {
+      "workflow": {
+        "accuracy": 0.9047619047619048,
+        "confusion_matrix": {
+          "clarify": {
+            "clarify": 4,
+            "deep_research": 0,
+            "direct": 0,
+            "qa": 2
+          },
+          "deep_research": {
+            "clarify": 0,
+            "deep_research": 18,
+            "direct": 0,
+            "qa": 0
+          },
+          "direct": {
+            "clarify": 1,
+            "deep_research": 0,
+            "direct": 4,
+            "qa": 1
+          },
+          "qa": {
+            "clarify": 0,
+            "deep_research": 0,
+            "direct": 0,
+            "qa": 12
+          }
+        },
+        "per_label": {
+          "clarify": {
+            "precision": 0.8,
+            "recall": 0.6666666666666666,
+            "f1": 0.7272727272727272,
+            "support": 6
+          },
+          "deep_research": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 18
+          },
+          "direct": {
+            "precision": 1.0,
+            "recall": 0.6666666666666666,
+            "f1": 0.8,
+            "support": 6
+          },
+          "qa": {
+            "precision": 0.8,
+            "recall": 1.0,
+            "f1": 0.888888888888889,
+            "support": 12
+          }
+        }
+      },
+      "macro_f1": 0.854040404040404,
+      "clarify": {
+        "precision": 0.8,
+        "recall": 0.6666666666666666,
+        "f1": 0.7272727272727272,
+        "support": 6
+      },
+      "false_clarify_rate": 0.027777777777777776,
+      "false_clarify_denominator": 36,
+      "permission_violations": 0,
+      "latency_p50_ms": 1934.7753545735031,
+      "latency_p95_ms": 2594.3405870581037,
+      "error_groups": {
+        "模型误判": [
+          {
+            "id": "sage-router-v2-003",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "direct_concepts"
+          },
+          {
+            "id": "sage-router-v2-121",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "clarify_missing_referent"
+          },
+          {
+            "id": "sage-router-v2-122",
+            "fields": [
+              "workflow"
+            ],
+            "scenario": "clarify_missing_referent"
+          }
+        ],
+        "文档指代": [
+          {
+            "id": "sage-router-v2-022",
+            "fields": [
+              "workflow",
+              "source_scope",
+              "document_ids"
+            ],
+            "scenario": "direct_context"
+          }
+        ]
+      },
+      "label_caveat": "Router kit labels are candidate behavioral expectations, not independently adjudicated gold. Groups are diagnostic heuristics; disputed expectations require human review.",
+      "fields": {
+        "source_scope_accuracy": {
+          "mean": 0.9722222222222222,
+          "n": 36
+        },
+        "allow_web_accuracy": {
+          "mean": 1.0,
+          "n": 36
+        },
+        "document_ids_accuracy": {
+          "mean": 0.9655172413793104,
+          "n": 29
+        },
+        "source_policy_accuracy": {
+          "mean": 0.9722222222222222,
+          "n": 36
+        }
+      }
+    }
+  },
+  "confidence_ab": {
+    "method": "Deterministic replay of identical final model predictions, confidence threshold=0.65; not a second live model test.",
+    "results": {
+      "False": {
+        "workflow": {
+          "accuracy": 0.8958333333333334,
+          "confusion_matrix": {
+            "clarify": {
+              "clarify": 13,
+              "deep_research": 1,
+              "direct": 0,
+              "qa": 3
+            },
+            "deep_research": {
+              "clarify": 0,
+              "deep_research": 57,
+              "direct": 0,
+              "qa": 1
+            },
+            "direct": {
+              "clarify": 5,
+              "deep_research": 1,
+              "direct": 24,
+              "qa": 2
+            },
+            "qa": {
+              "clarify": 0,
+              "deep_research": 1,
+              "direct": 1,
+              "qa": 35
+            }
+          },
+          "per_label": {
+            "clarify": {
+              "precision": 0.7222222222222222,
+              "recall": 0.7647058823529411,
+              "f1": 0.7428571428571428,
+              "support": 17
+            },
+            "deep_research": {
+              "precision": 0.95,
+              "recall": 0.9827586206896551,
+              "f1": 0.9661016949152542,
+              "support": 58
+            },
+            "direct": {
+              "precision": 0.96,
+              "recall": 0.75,
+              "f1": 0.8421052631578947,
+              "support": 32
+            },
+            "qa": {
+              "precision": 0.8536585365853658,
+              "recall": 0.9459459459459459,
+              "f1": 0.8974358974358975,
+              "support": 37
+            }
+          }
+        },
+        "macro_f1": 0.8621249995915473,
+        "clarify": {
+          "precision": 0.7222222222222222,
+          "recall": 0.7647058823529411,
+          "f1": 0.7428571428571428,
+          "support": 17
+        },
+        "false_clarify_rate": 0.03937007874015748,
+        "false_clarify_denominator": 127,
+        "permission_violations": 0,
+        "latency_p50_ms": null,
+        "latency_p95_ms": null,
+        "error_groups": {
+          "模型误判": [
+            {
+              "id": "sage-router-v2-003",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "direct_concepts"
+            },
+            {
+              "id": "sage-router-v2-005",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "direct_concepts"
+            },
+            {
+              "id": "sage-router-v2-009",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "direct_concepts"
+            },
+            {
+              "id": "sage-router-v2-016",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "direct_concepts"
+            },
+            {
+              "id": "sage-router-v2-017",
+              "fields": [
+                "workflow",
+                "source_scope",
+                "allow_web"
+              ],
+              "scenario": "direct_concepts"
+            },
+            {
+              "id": "sage-router-v2-018",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "direct_concepts"
+            },
+            {
+              "id": "sage-router-v2-060",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "qa_workspace"
+            },
+            {
+              "id": "sage-router-v2-064",
+              "fields": [
+                "workflow",
+                "source_scope"
+              ],
+              "scenario": "qa_workspace"
+            },
+            {
+              "id": "sage-router-v2-095",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "research_local_selected"
+            },
+            {
+              "id": "sage-router-v2-121",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "clarify_missing_referent"
+            },
+            {
+              "id": "sage-router-v2-122",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "clarify_missing_referent"
+            },
+            {
+              "id": "sage-router-v2-123",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "clarify_missing_referent"
+            },
+            {
+              "id": "sage-router-v2-125",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "clarify_missing_referent"
+            }
+          ],
+          "文档指代": [
+            {
+              "id": "sage-router-v2-022",
+              "fields": [
+                "workflow",
+                "source_scope",
+                "document_ids"
+              ],
+              "scenario": "direct_context"
+            },
+            {
+              "id": "sage-router-v2-028",
+              "fields": [
+                "workflow",
+                "source_scope",
+                "document_ids"
+              ],
+              "scenario": "direct_context"
+            }
+          ]
+        },
+        "label_caveat": "Router kit labels are candidate behavioral expectations, not independently adjudicated gold. Groups are diagnostic heuristics; disputed expectations require human review.",
+        "fields": {
+          "source_scope_accuracy": {
+            "mean": 0.968503937007874,
+            "n": 127
+          },
+          "allow_web_accuracy": {
+            "mean": 0.9921259842519685,
+            "n": 127
+          },
+          "document_ids_accuracy": {
+            "mean": 0.9809523809523809,
+            "n": 105
+          },
+          "source_policy_accuracy": {
+            "mean": 0.968503937007874,
+            "n": 127
+          }
+        }
+      },
+      "True": {
+        "workflow": {
+          "accuracy": 0.8958333333333334,
+          "confusion_matrix": {
+            "clarify": {
+              "clarify": 13,
+              "deep_research": 1,
+              "direct": 0,
+              "qa": 3
+            },
+            "deep_research": {
+              "clarify": 0,
+              "deep_research": 57,
+              "direct": 0,
+              "qa": 1
+            },
+            "direct": {
+              "clarify": 5,
+              "deep_research": 1,
+              "direct": 24,
+              "qa": 2
+            },
+            "qa": {
+              "clarify": 0,
+              "deep_research": 1,
+              "direct": 1,
+              "qa": 35
+            }
+          },
+          "per_label": {
+            "clarify": {
+              "precision": 0.7222222222222222,
+              "recall": 0.7647058823529411,
+              "f1": 0.7428571428571428,
+              "support": 17
+            },
+            "deep_research": {
+              "precision": 0.95,
+              "recall": 0.9827586206896551,
+              "f1": 0.9661016949152542,
+              "support": 58
+            },
+            "direct": {
+              "precision": 0.96,
+              "recall": 0.75,
+              "f1": 0.8421052631578947,
+              "support": 32
+            },
+            "qa": {
+              "precision": 0.8536585365853658,
+              "recall": 0.9459459459459459,
+              "f1": 0.8974358974358975,
+              "support": 37
+            }
+          }
+        },
+        "macro_f1": 0.8621249995915473,
+        "clarify": {
+          "precision": 0.7222222222222222,
+          "recall": 0.7647058823529411,
+          "f1": 0.7428571428571428,
+          "support": 17
+        },
+        "false_clarify_rate": 0.03937007874015748,
+        "false_clarify_denominator": 127,
+        "permission_violations": 0,
+        "latency_p50_ms": null,
+        "latency_p95_ms": null,
+        "error_groups": {
+          "模型误判": [
+            {
+              "id": "sage-router-v2-003",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "direct_concepts"
+            },
+            {
+              "id": "sage-router-v2-005",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "direct_concepts"
+            },
+            {
+              "id": "sage-router-v2-009",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "direct_concepts"
+            },
+            {
+              "id": "sage-router-v2-016",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "direct_concepts"
+            },
+            {
+              "id": "sage-router-v2-017",
+              "fields": [
+                "workflow",
+                "source_scope",
+                "allow_web"
+              ],
+              "scenario": "direct_concepts"
+            },
+            {
+              "id": "sage-router-v2-018",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "direct_concepts"
+            },
+            {
+              "id": "sage-router-v2-060",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "qa_workspace"
+            },
+            {
+              "id": "sage-router-v2-064",
+              "fields": [
+                "workflow",
+                "source_scope"
+              ],
+              "scenario": "qa_workspace"
+            },
+            {
+              "id": "sage-router-v2-095",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "research_local_selected"
+            },
+            {
+              "id": "sage-router-v2-121",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "clarify_missing_referent"
+            },
+            {
+              "id": "sage-router-v2-122",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "clarify_missing_referent"
+            },
+            {
+              "id": "sage-router-v2-123",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "clarify_missing_referent"
+            },
+            {
+              "id": "sage-router-v2-125",
+              "fields": [
+                "workflow"
+              ],
+              "scenario": "clarify_missing_referent"
+            }
+          ],
+          "文档指代": [
+            {
+              "id": "sage-router-v2-022",
+              "fields": [
+                "workflow",
+                "source_scope",
+                "document_ids"
+              ],
+              "scenario": "direct_context"
+            },
+            {
+              "id": "sage-router-v2-028",
+              "fields": [
+                "workflow",
+                "source_scope",
+                "document_ids"
+              ],
+              "scenario": "direct_context"
+            }
+          ]
+        },
+        "label_caveat": "Router kit labels are candidate behavioral expectations, not independently adjudicated gold. Groups are diagnostic heuristics; disputed expectations require human review.",
+        "fields": {
+          "source_scope_accuracy": {
+            "mean": 0.968503937007874,
+            "n": 127
+          },
+          "allow_web_accuracy": {
+            "mean": 0.9921259842519685,
+            "n": 127
+          },
+          "document_ids_accuracy": {
+            "mean": 0.9809523809523809,
+            "n": 105
+          },
+          "source_policy_accuracy": {
+            "mean": 0.968503937007874,
+            "n": 127
+          }
+        }
+      }
+    }
+  },
+  "quality_gate": {
+    "status": "passed",
+    "rules": [
+      {
+        "suite": "router",
+        "metric": "workflow_accuracy",
+        "min_delta": 0,
+        "min_samples": 40,
+        "modes": [
+          "live"
+        ],
+        "required": true,
+        "value": 0.8958333333333334,
+        "n": 144,
+        "delta": 0.13194444444444453,
+        "status": "passed",
+        "reason": ""
+      },
+      {
+        "suite": "router",
+        "metric": "classification.macro_f1",
+        "min_delta": 0,
+        "min_samples": 40,
+        "modes": [
+          "live"
+        ],
+        "required": true,
+        "value": 0.8621249995915473,
+        "n": 144,
+        "delta": 0.12053852402681786,
+        "status": "passed",
+        "reason": ""
+      },
+      {
+        "suite": "router",
+        "metric": "permission_violations",
+        "max": 0,
+        "min_samples": 40,
+        "modes": [
+          "live"
+        ],
+        "required": true,
+        "value": 0,
+        "n": 144,
+        "delta": null,
+        "status": "passed",
+        "reason": ""
+      }
+    ]
+  },
+  "environment": {
+    "model": "qwen3.5:2b",
+    "base_url": "http://127.0.0.1:11434",
+    "confidence_threshold": 0.65,
+    "confidence_gate": false,
+    "ollama_version": {
+      "version": "0.40.3"
+    },
+    "model_metadata": {
+      "name": "qwen3.5:2b",
+      "model": "qwen3.5:2b",
+      "modified_at": "2026-10-12T18:52:02.301318754+08:00",
+      "size": 3117475695,
+      "digest": "dfaf2605162e689c8cac330dc4a190c4c50ad30aa47814a8fe9b79fa5127e97e",
+      "details": {
+        "parent_model": "",
+        "format": "safetensors",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": "mxfp8",
+        "runner": "mlx"
+      },
+      "capabilities": [
+        "completion",
+        "vision",
+        "thinking",
+        "tools"
+      ]
+    }
+  }
+}

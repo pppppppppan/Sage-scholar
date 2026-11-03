@@ -11,7 +11,7 @@ from sage_scholar.application.qa_service import QAResult
 from sage_scholar.config import RouterConfig
 from sage_scholar.domain.execution import RunOutcome
 from sage_scholar.routing import QueryRouter, Workflow, SourceScope
-from sage_scholar.routing.classifier import LocalClassifier, SemanticIntent, RouterUnavailable
+from sage_scholar.routing.classifier import LocalClassifier, SemanticIntent, IntentPrediction, RouterUnavailable
 from sage_scholar.runtime import RunManager, RunStatus
 from sage_scholar.runtime.checkpoints import Checkpoints
 from sage_scholar.runtime.store import RunStore
@@ -58,7 +58,7 @@ def test_local_ollama_schema_no_cloud_or_proxy():
     seen = []
     def respond(request):
         seen.append(json.loads(request.content))
-        return httpx.Response(200, json={"message": {"content": intent().model_dump_json()}})
+        return httpx.Response(200, json={"message": {"content": IntentPrediction(workflow="direct",source_intent="conversation",confidence=.98).model_dump_json()}})
     client = LocalClassifier(RouterConfig(), transport=httpx.MockTransport(respond))
     assert client.classify({"query": "不要调研，只解释概念"}).workflow == "direct"
     assert seen[0]["think"] is False and seen[0]["format"]["type"] == "object"
@@ -278,5 +278,27 @@ def test_mentioned_document_is_not_automatically_selected(tmp_path):
         assert run.status == RunStatus.COMPLETED, run.error
         assert classifier.calls[0]["selected_document_ids"] == []
         assert classifier.calls[0]["catalog"][0]["document_id"] == "A"
+        await c.close()
+    asyncio.run(scenario())
+
+
+def test_ignored_stale_ui_selection_does_not_block_public_research(tmp_path):
+    from sage_scholar.application.document_resolver import DocumentResolution
+    class Documents:
+        async def catalog(self):return []
+        async def resolve(self,query,selected):
+            return DocumentResolution(message='所选论文已不存在')
+    async def scenario():
+        class Research:
+            async def run(self,request,emit,cancelled):
+                assert request.document_ids==() and request.source_policy.permits_web
+                return RunOutcome(result={'report':'public report'})
+        classifier=Classifier(SemanticIntent(workflow='deep_research',source_scope='public',allow_web=True,confidence=.9))
+        c=setup(tmp_path,classifier,Research(),docs=Documents())
+        response=await c.service.execute(QueryCommand(query='忽略选中项，独立公网研究',document_ids=['deleted']))
+        await c.manager._tasks[response.run_id]
+        run=c.manager.get(response.run_id)
+        assert run.status==RunStatus.COMPLETED,run.error
+        assert run.result['report']=='public report'
         await c.close()
     asyncio.run(scenario())

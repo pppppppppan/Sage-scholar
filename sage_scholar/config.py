@@ -47,6 +47,7 @@ class GenerationConfig:
 
 @dataclass
 class RouterConfig:
+    confidence_gate: bool = field(default_factory=lambda: os.getenv("ROUTER_CONFIDENCE_GATE", "false").lower() == "true")
     base_url: str = field(default_factory=lambda: os.getenv("ROUTER_BASE_URL", "http://127.0.0.1:11434"))
     model: str = field(default_factory=lambda: os.getenv("ROUTER_MODEL", "qwen3.5:2b"))
     timeout: float = field(default_factory=lambda: float(os.getenv("ROUTER_TIMEOUT", "60")))

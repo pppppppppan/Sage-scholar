@@ -72,6 +72,10 @@ def evaluate(suite, sample, observed, k):
         fields = [key for key in ('source_scope','allow_web','document_ids') if key in expected]
         if {'source_scope','allow_web'} <= set(fields):
             scores['source_policy_accuracy'] = float(all(expected[k] == observed.get(k) for k in fields))
+        from evals.runners.router_diagnostics import violations
+        scores['permission_violations'] = len(violations(sample,observed))
+        if 'workflow' in expected and expected['workflow'] != 'clarify':
+            scores['false_clarify_rate'] = float(observed.get('workflow') == 'clarify')
         if 'unavailable' in expected:
             scores['unavailable_handling'] = float(expected['unavailable'] == observed.get('unavailable', False))
     elif suite == 'citations':

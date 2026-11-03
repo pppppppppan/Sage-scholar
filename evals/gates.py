@@ -5,8 +5,9 @@ from evals.metrics import classification
 
 def metric(rows, name):
     if name.startswith('classification.'):
-        pairs = [(r['sample']['expected']['status'], r['observed'].get('status','missing')) for r in rows
-                 if 'status' in r['sample'].get('expected',{}) and 'observed' in r and r.get('evaluated',True)]
+        label = 'workflow' if rows and rows[0].get('suite') == 'router' else 'status'
+        pairs = [(r['sample']['expected'][label], r['observed'].get(label,'missing')) for r in rows
+                 if label in r['sample'].get('expected',{}) and 'observed' in r and r.get('evaluated',True) and not r.get('error')]
         if not pairs:
             return None, 0
         report = classification(pairs)

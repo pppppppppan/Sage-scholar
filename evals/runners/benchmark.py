@@ -51,7 +51,7 @@ def worker(spec):
         reranker=Reranker()
         embed.invoke(['warmup'],task='query')
         gateway=SimpleNamespace(invoke=lambda text:(embed.invoke([text],task='query')[0],0))
-        reranker_name='cross-encoder/ms-marco-MiniLM-L-6-v2'
+        reranker_name=reranker.config.model
     else:
         gateway=SimpleNamespace(invoke=lambda text:(embedding(text),0))
         def rerank(query,chunks,top_k):

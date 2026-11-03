@@ -65,6 +65,8 @@ python -m evals run --suite rag --live --answers --dataset /path/my-rag.jsonl --
 
 ## 评估真实本地 Router
 
+Router V2 增加 42 题开发集、144 题候选行为标注集及冻结 holdout，保存模型原始输出、策略覆盖和误澄清诊断。数据未冒充人工审核 Gold；设计、命令与实测结果见 [ROUTER_V2.md](ROUTER_V2.md)。`gate_configs/router-v2.json` 要求 live workflow / macro-F1 不低于相同数据 baseline、明确权限违例为 0；仅手动运行，CI 不调用模型。
+
 ```bash
 python -m evals run --suite router --live --dataset /path/router.jsonl
 ```
@@ -131,8 +133,8 @@ Section 缓存仅存在于一次 `retrieve_with_warnings()` 调用中。键为 `
 Reranker 首次真正重排时才加载。配置见 `.env.example`：
 
 ```dotenv
-RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
-# 可切换 BAAI/bge-reranker-v2-m3；默认不变，等待真实对照验证
+RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+# 可选对照基线：cross-encoder/ms-marco-MiniLM-L-6-v2
 RERANKER_DEVICE=cpu
 RERANKER_BATCH_SIZE=8
 RERANKER_MAX_LENGTH=512
@@ -200,10 +202,16 @@ python -m evals run --suite rag --live --dataset evals/datasets/gold/rag.jsonl \
 ### 本次真实执行与限制（2026-10-23）
 
 - 14 个中英问题、同 9 个候选段落，旧模型 Recall@3=0.857、MRR=0.810、nDCG=0.821；中文 7 题分别为 0.714/0.619/0.643，英文 7 题均为 1.000。CPU 平均重排约 27 ms，进程峰值约 626 MB。原始结果见 `reports/reranker-20261023-111606.json`。
-- BGE 下载经直接连接和本地代理重试均发生 TLS EOF，权重不完整，严格对照报告 unavailable。没有 BGE 分数，因此保留 MiniLM 默认；配置切换和对照命令已完成，不能声称 BGE 已改善质量。
+- BGE 下载经直接连接和本地代理重试均发生 TLS EOF，权重不完整，严格对照报告 unavailable。这是首次对照的历史结果，当时保留 MiniLM 默认；随后下载完成后的实测与当前默认值见下方补充。
 - E5 + 真实持久检索 + MiniLM，14 题 Recall@5=1.000、MRR=0.838、nDCG=0.877，平均检索约 51 ms。仅限上述小候选语料。
 - 当前本地 Qwen Router 6 题 workflow accuracy=0.500；具备完整策略标签的 4 题 source-policy accuracy=0.750。保留失败案例，未修改 Router 核心逻辑，也不降低门禁来掩盖失败；样本不足以推断生产准确率。
 - 未额外调用付费 Supervisor/Skills/Citation 模型；其执行器经过调用链测试，真实质量未评估。真实 Research 的语义质量需已有 Run 和人工标注。
 - 本机 FAISS/PyTorch 自带两份 libomp，直接合载会中止。验证时用 `DYLD_LIBRARY_PATH=/opt/miniconda3/envs/deep-research/lib/python3.14/site-packages/torch/lib` 统一到 PyTorch 库路径，并设 OMP/OPENBLAS 线程数为 1。没有设置不安全的 `KMP_DUPLICATE_LIB_OK`，也没有修改系统依赖。其他环境不应照抄此绝对路径。
 
 最终回归：后端 `pytest -q` 387 passed（6 条现有 SWIG 弃用警告）；`compileall sage_scholar tests evals` 通过；前端 11 tests passed、lint/build 通过；离线 Quality Gate 通过。真实 BGE 对照因权重未下载完整返回 1，不能计为通过。
+
+### BGE 下载完成后的对照与默认值更新
+
+同一批 14 题、9 个候选段落、CPU 单线程实测：BGE Recall@3=1.000、MRR=0.964、nDCG=0.974；中文 7 题 MRR=0.929（MiniLM 0.619），英文 7 题两者均为 1.000。BGE 平均重排约 427 ms、进程峰值约 1971 MB；MiniLM 约 26 ms、623 MB。该结果仅适用于此小样本短段落集合。
+
+源码默认、`.env.example` 和本机 `.env` 现统一为 BGE；保留 MiniLM 供显式对照。历史报告不改写。索引性能 benchmark 从实际配置读取模型名称，避免切换后仍误标为 MiniLM。重排模型变化不改变 Embedding 向量，不需要重建文献索引，重启后端即可。

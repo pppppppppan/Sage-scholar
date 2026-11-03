@@ -46,7 +46,8 @@ def router(sample):
         if prediction.get('unavailable'):
             raise httpx.ConnectError('synthetic unavailable', request=request)
         intent = {k:v for k,v in prediction.items() if k in {'workflow','source_scope','document_ids','allow_web'}}
-        intent.setdefault('source_scope','conversation')
+        intent['source_intent'] = intent.pop('source_scope','conversation')
+        intent.pop('allow_web',None)
         intent.update(confidence=.99,clarification='',reason='scripted synthetic model output')
         return httpx.Response(200,json={'message':{'content':json.dumps(intent)}})
     start=time.perf_counter()

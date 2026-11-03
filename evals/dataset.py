@@ -30,6 +30,20 @@ def load(path):
                 raise ValueError('Verified gold requires reviewer/method/basis')
             if item['provenance'].get('kind') == 'real_source' and not item.get('sources'):
                 raise ValueError('Real-source gold requires versioned source locators')
+        if item.get('suite') == 'router':
+            from sage_scholar.routing.models import SourceScope
+            expected = item.get('expected',{})
+            if 'workflow' in expected and expected['workflow'] not in {'direct','qa','clarify','deep_research'}:
+                raise ValueError('Invalid router workflow label')
+            if 'source_scope' in expected:
+                SourceScope(expected['source_scope'])
+            if (expected.get('allow_web') and 'source_scope' in expected
+                    and expected['source_scope'] not in {'public','mixed'}):
+                raise ValueError('Router web label conflicts with scope')
+            inputs=item.get('route_input',{})
+            known={d['document_id'] for d in inputs.get('catalog',[])}|set(inputs.get('document_ids',[]))
+            if not set(expected.get('document_ids',[])) <= known:
+                raise ValueError('Router gold references unknown document')
         if item.get('documents'):
             ids = [d['id'] for d in item['documents']]
             if len(set(ids)) != len(ids):

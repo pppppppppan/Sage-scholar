@@ -1,50 +1,50 @@
-"""Semantic intent plus deterministic permission validation, never keyword routing."""
+"""Single semantic call → source identity resolution → deterministic permissions."""
 from .classifier import LocalClassifier
-from .models import ExecutionMode, RouteDecision, SourceScope, Workflow
+from .diagnostics import record
+from .models import SourceScope, Workflow
+from .sources import SourceResolver
+from .policy import PolicyValidator
 
 
 class QueryRouter:
-    def __init__(self, classifier=None, *, confidence_threshold=0.65):
+    def __init__(self, classifier=None, *, confidence_threshold=None, confidence_gate=None):
         self.classifier = classifier or LocalClassifier()
-        self.confidence_threshold = confidence_threshold
+        config = getattr(self.classifier,'config',None)
+        self.confidence_threshold = confidence_threshold if confidence_threshold is not None else getattr(config,'confidence_threshold',.65)
+        self.confidence_gate = confidence_gate if confidence_gate is not None else getattr(config,'confidence_gate',False)
+        self.sources, self.policy = SourceResolver(), PolicyValidator()
 
     def route(self, query, *, requested_workflow=None, requested_scope=None, document_ids=None,
-              allow_web=None, history=(), catalog=(), resolution_message=None):
-        if requested_workflow in {Workflow.CITATION_AUDIT, Workflow.PAPER2CODE, Workflow.SEARCH}:
-            raise ValueError("该独立执行类型未提供，请选择 Direct、QA 或 Deep Research")
+              allow_web=None, history=(), catalog=None, resolution_message=None):
+        if requested_workflow is not None:
+            requested_workflow = Workflow(requested_workflow)
+            if requested_workflow not in {Workflow.DIRECT, Workflow.QA, Workflow.DEEP_RESEARCH}:
+                raise ValueError('该独立执行类型未提供，请选择 Direct、QA 或 Deep Research')
+        if requested_scope is not None:
+            requested_scope = SourceScope(requested_scope)
         selected = list(dict.fromkeys(document_ids or []))
         intent = self.classifier.classify({
-            "query": query, "requested_workflow": requested_workflow, "requested_scope": requested_scope,
-            "selected_document_ids": selected, "allow_web": allow_web,
-            "recent_conversation": [{"role": m["role"], "content": m["content"][:1500]} for m in history[-6:]],
-            "catalog": list(catalog)[:50],
+            'query':query,'requested_workflow':requested_workflow,'requested_scope':requested_scope,
+            'selected_document_ids':selected,'allow_web':allow_web,
+            'recent_conversation':[{'role':m['role'],'content':m['content'][:1500]} for m in history[-6:] if m.get('role') in {'user','assistant'}],
+            'catalog':[{k:d[k] for k in ('document_id','title','ready') if k in d} for d in list(catalog or ())[:50]],
         })
-        workflow = Workflow(requested_workflow or intent.workflow)
-        scope = SourceScope(requested_scope or intent.source_scope)
-        known = {d["document_id"] for d in catalog} | set(selected)
-        unknown = set(intent.document_ids) - known
-        docs = selected or [i for i in dict.fromkeys(intent.document_ids) if i in known]
-        question = None if workflow == Workflow.DIRECT else (resolution_message or (
-            "无法确认所指论文，请上传或明确选择文档。" if unknown else None))
-        if intent.workflow == "clarify" or intent.confidence < self.confidence_threshold:
-            question = question or intent.clarification or "请补充你希望回答的问题、所指资料或研究范围。"
-        # Explicit source boundaries always win; the model cannot widen them.
-        if requested_scope is None and docs and scope not in {SourceScope.MIXED, SourceScope.CONVERSATION}:
-            scope = SourceScope.SELECTED_DOCUMENTS
-        web = bool(intent.allow_web and allow_web is not False and scope in {SourceScope.PUBLIC, SourceScope.MIXED})
-        if workflow == Workflow.DIRECT:
-            scope, docs, web = SourceScope.CONVERSATION, [], False
-        if workflow == Workflow.QA:
-            if scope not in {SourceScope.SELECTED_DOCUMENTS, SourceScope.WORKSPACE, SourceScope.MIXED}:
-                question = question or "请上传或选择要问的论文，或者说明要查询文献库中的哪些资料。"
-            if not docs and not any(d.get("ready", False) for d in catalog):
-                question = question or "文献库中没有可用资料，请先上传论文并等待解析完成。"
-        if scope == SourceScope.SELECTED_DOCUMENTS and not docs:
-            question = question or "请先选择本次使用的论文。"
-        if workflow == Workflow.DEEP_RESEARCH and (scope == SourceScope.CONVERSATION or (scope == SourceScope.PUBLIC and not web)):
-            question = question or "当前不允许联网，请选择本地资料，或明确允许公网资料检索。"
-        if question:
-            workflow = Workflow.CLARIFY
-        return RouteDecision(workflow=workflow, source_scope=scope, document_ids=docs, allow_web=web,
-            execution_mode=ExecutionMode.RUN, needs_clarification=bool(question), clarification_message=question,
-            confidence=intent.confidence, reason_code="semantic_clarify" if question else "local_semantic")
+        # An explicit workflow override changes the operation, not permissions. When the
+        # model treated it as direct, resolve the explicitly supplied local QA context.
+        effective = intent
+        if requested_workflow == Workflow.QA and intent.workflow=='direct' and intent.source_scope==SourceScope.CONVERSATION:
+            effective = intent.model_copy(update={'source_scope':SourceScope.SELECTED_DOCUMENTS if selected else SourceScope.WORKSPACE})
+        if requested_workflow == Workflow.DIRECT or (not requested_workflow and intent.workflow=='direct'):
+            effective = intent.model_copy(update={'source_scope':SourceScope.CONVERSATION})
+        sources = self.sources.resolve(effective,requested_scope=requested_scope,selected=selected,
+            catalog=catalog,resolution_message=resolution_message)
+        decision,trigger = self.policy.validate(intent,sources,requested_workflow=requested_workflow,
+            requested_scope=requested_scope,allow_web=allow_web,confidence_gate=self.confidence_gate,
+            confidence_threshold=self.confidence_threshold)
+        record(final_decision=decision.model_dump(mode='json'),
+            source_resolution={'selected':selected,'resolved':sources.document_ids,'unknown':list(sources.unknown),
+                               'scope':sources.scope,'available_local':sources.available_local,'question':sources.question},
+            policy_overrides={k:{'model':getattr(intent,k,None),'final':getattr(decision,k)}
+                for k in ('workflow','source_scope','allow_web','document_ids') if getattr(intent,k,None)!=getattr(decision,k)},
+            clarify_trigger=trigger,confidence_gate=self.confidence_gate)
+        return decision

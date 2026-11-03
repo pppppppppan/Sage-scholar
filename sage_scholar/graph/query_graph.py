@@ -97,13 +97,10 @@ class QueryGraphRunner:
             wait(emit("routing", {"message": "正在使用本地模型理解问题…"}))
             options = execution.metadata.get("_routing", {})
             selected = list(options.get("document_ids", execution.document_ids))
-            catalog = wait(self.documents.catalog()) if self.documents else []
+            catalog = wait(self.documents.catalog()) if self.documents else None
             resolution = None
-            if self.documents and selected:
-                # Only explicit UI/API selection is a hard boundary. A title mentioned in
-                # text (possibly negated) is classified against the catalog by the model.
-                resolved = wait(self.documents.resolve(execution.query, selected))
-                resolution = resolved.message
+            # UI selection is contextual. Validate only sources the chosen route uses;
+            # otherwise a stale selection can wrongly block an unrelated public task.
             # An explicit save command is an operation, not a keyword-based intent classifier.
             remember = re.fullmatch(r"(?:请)?记住[：:]\s*(.+)", execution.query.strip(), re.S)
             if remember:
