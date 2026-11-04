@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sage_scholar.config import RouterConfig
 from sage_scholar.context.token_counter import TokenCounter
 from .models import SourceScope
+from sage_scholar.observability import model_call, usage
 
 
 class SemanticIntent(BaseModel):
@@ -88,6 +89,7 @@ class LocalClassifier:
             raise ValueError("ROUTER_BASE_URL 必须指向本机 Ollama 地址，不将对话发送到云端分类服务")
         self.transport = transport
 
+    @model_call
     def classify(self, payload: dict) -> SemanticIntent:
         from sage_scholar.runtime.control import CURRENT_CONTROL, check_control
         check_control()
@@ -122,6 +124,7 @@ class LocalClassifier:
                             raise RouterUnavailable("本地 Router 返回超出大小限制")
                 data = json.loads(body)
                 content = data["message"]["content"]
+                usage(self.config.model, data.get("prompt_eval_count"), data.get("eval_count"))
                 if control and control.store:
                     prompt = int(data.get("prompt_eval_count", tokens))
                     completion = int(data.get("eval_count", TokenCounter().count(content)))

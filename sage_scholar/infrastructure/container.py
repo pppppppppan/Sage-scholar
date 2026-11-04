@@ -28,6 +28,8 @@ class ApplicationContainer:
 
     def __init__(self, config: Config | None = None):
         self.config = config or Config()
+        from sage_scholar.observability import Observer
+        self.observability = Observer.from_env()
         self.memory_store = MemoryStore(self.config.data_dir)
         self.run_store = RunStore(self.config.data_dir)
         self.run_store.conversations.adopt_existing_runs()
@@ -52,7 +54,7 @@ class ApplicationContainer:
         self.memory_jobs = MemoryJobStore(self.run_store)
         self.memory_background = MemoryBackground(self.memory_service, self.retrieval, self.memory_jobs, self.checkpoints)
         self.run_manager = RunManager(max_concurrent_runs=1, store=self.run_store, checkpoints=self.checkpoints,
-            on_completed=self.memory_background.completed)
+            on_completed=self.memory_background.completed, observability=self.observability)
         self.runtime_provider = ResearchRuntimeProvider(
             self.config,
             llm_client_factory=lambda: self.model_gateway.client,
@@ -89,3 +91,4 @@ class ApplicationContainer:
         self.runtime_provider.close()
         self.checkpoints.close()
         self.run_store.close()
+        await self.observability.close()

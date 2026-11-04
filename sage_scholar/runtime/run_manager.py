@@ -34,7 +34,9 @@ class _RunState:
 
 class RunManager:
     """Durable lifecycle and SSE; never tracks a graph's current/next node."""
-    def __init__(self, max_concurrent_runs=2, *, store=None, checkpoints=None, on_completed=None):
+    def __init__(self, max_concurrent_runs=2, *, store=None, checkpoints=None, on_completed=None, observability=None):
+        from sage_scholar.observability import Observer
+        self.observability = observability or Observer()
         self.store, self.checkpoints = store, checkpoints
         self.on_completed = on_completed
         self._runs = {snapshot.run_id: _RunState(snapshot, events) for snapshot, events in store.load()} if store else {}
@@ -292,6 +294,10 @@ class RunManager:
                 await asyncio.gather(*pending, return_exceptions=True)
 
     async def _execute(self, state, runner):
+        with self.observability.run(state):
+            await self._execute_run(state, runner)
+
+    async def _execute_run(self, state, runner):
         try:
             async with self._semaphore:
                 if state.cancel_requested or state.shutdown_requested:
@@ -344,6 +350,8 @@ class RunManager:
             state.snapshot.reason = str(exc) or "服务关闭，任务中断"
             await self._append_event(state, "run_cancelled" if status == RunStatus.CANCELLED else "run_interrupted", {"reason": state.snapshot.reason})
         except Exception as exc:
+            from sage_scholar.observability.instrumentation import failure
+            failure(exc)
             state.snapshot.error = str(exc)
             self._set_status(state, RunStatus.FAILED)
             await self._append_event(state, "error", {"message": str(exc)})
@@ -362,6 +370,10 @@ class RunManager:
             execution = ExecutionRequest.model_validate(data["execution"])
             if execution.run_id != state.snapshot.run_id:
                 raise ValueError("路由结果不属于当前 Run")
+            association = state.snapshot.execution.metadata.get("_observability")
+            if association:
+                # A restored graph may carry an older attempt reference. Lifecycle owns this ID.
+                execution = execution.model_copy(update={"metadata": {**execution.metadata, "_observability": association}})
             state.snapshot.execution = execution
             state.snapshot.workflow = execution.workflow
             state.snapshot.progress["route"] = data["route"]
@@ -403,5 +415,7 @@ class RunManager:
         if self.store:
             self.store.append(state.snapshot, event)
         state.events.append(event)
+        if event_type in {"run_cancelled", "run_interrupted", "run_resumed", "human_responded", "waiting_for_user"}:
+            self.observability.lifecycle(state.snapshot, event_type)
         async with state.changed:
             state.changed.notify_all()

@@ -41,7 +41,10 @@ class MCPTool(BaseTool):
         super().__init__(name=prefixed_name, description=description, parameters=[])
         
     def run_tool(self, parameters: dict[str, Any]) -> str:
-        return self.mcp_client.call_tool(self.original_name, parameters)
+        from sage_scholar.observability import span
+        # Transport child, not a second logical tool observation/call counter.
+        with span("MCP.transport"):
+            return self.mcp_client.call_tool(self.original_name, parameters)
 
     def to_schema(self):
         return {

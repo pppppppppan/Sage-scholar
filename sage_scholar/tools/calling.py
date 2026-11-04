@@ -4,6 +4,8 @@ import json
 from sage_scholar.runtime.control import check_control, ResearchBudgetReached, CURRENT_CONTROL
 from sage_scholar.runtime.journal import WorkflowInterrupted
 from sage_scholar.tools.base_tool import ToolCallError
+from sage_scholar.observability import execute_tool
+from sage_scholar.tools.results import is_error_result
 
 
 def invoke_tools(llm, messages, tools, *, tag, max_tokens=4096, temperature=0,
@@ -20,6 +22,7 @@ def invoke_tools(llm, messages, tools, *, tag, max_tokens=4096, temperature=0,
             "原图已选定，将在工具收集完成后的最终回答阶段提供。当前先加载需要的 Skill、"
             "检索资料和定位证据；不要从图注猜测视觉细节。资料就绪时简短表示可以开始读图。"})
     used = 0
+    failures = {}
     visual_state = visual_state if visual_state is not None else {}
 
     def visual_answer():
@@ -110,10 +113,12 @@ def invoke_tools(llm, messages, tools, *, tag, max_tokens=4096, temperature=0,
                 if control and control.store and not control.store.reserve(control.request.run_id, control.request.budget.get("max_tool_calls", 0)):
                     used = max_calls
                     raise ToolCallError("Run 工具预算已耗尽；不能继续核验的部分请明确说明")
-                content = tool.run_tool(parameters)
+                content = execute_tool(tool, parameters, retry_count=failures.get(tool.name, 0))
+                failures[tool.name] = failures.get(tool.name, 0) + 1 if is_error_result(content) else 0
             except (WorkflowInterrupted, ResearchBudgetReached):
                 raise
             except Exception as exc:
+                failures[call.function.name] = failures.get(call.function.name, 0) + 1
                 content = json.dumps({"error": str(exc)}, ensure_ascii=False)
             history.append({"role": "tool", "tool_call_id": call.id, "content": content})
         if used >= max_calls or step == max_rounds - 1:

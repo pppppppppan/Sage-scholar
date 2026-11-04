@@ -238,7 +238,8 @@ class Researcher(AgentBase):
 
         else:
             try:
-                tool_result = tool.run_tool(parameters)
+                from sage_scholar.observability import execute_tool
+                tool_result = execute_tool(tool, parameters, retry_count=self._failed_tools.get(name, 0))
                 raw_len = len(tool_result)
 
                 logger.info("[Researcher:%s] 工具结果: %s, %d 字符", self.name, name, raw_len)

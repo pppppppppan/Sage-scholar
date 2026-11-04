@@ -1,5 +1,36 @@
 # SAGE Scholar
 
+## Agent Observability
+
+可选使用 Langfuse UI 查看 Run → Router → Direct / QA / Deep Research → Supervisor / 并行 Researcher / Review / Writer → 模型和工具调用。使用 OpenTelemetry 1.44 的私有 Provider，通过官方 OTLP/HTTP 接口导出；没有额外的 Agent 或监控服务，也不启用会自动收集 Prompt 的全局 instrumentor。现有自定义 LLM、MCP 和 Graph 节点采用统一的薄封装，避免 LangChain Callback 与手动埋点重复统计。
+
+默认 `OBSERVABILITY_ENABLED=false`，不创建 Exporter、不联网、不要求安装可选 SDK。SQLite、Checkpoint、Budget、Journal 和 SSE 仍是任务的真实记录；Langfuse 不参与调度和恢复。完整配置、统计口径及限制见 [Observability 说明](evals/OBSERVABILITY.md)。
+
+```bash
+conda activate deep-research
+python -m pip install -r requirements-observability.txt
+```
+
+在 `.env` 配置 Langfuse 项目密钥后重启后端：
+
+```dotenv
+OBSERVABILITY_ENABLED=true
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+LANGFUSE_PUBLIC_KEY=pk-lf-your-project-key
+LANGFUSE_SECRET_KEY=sk-lf-your-project-key
+OBSERVABILITY_MODEL_PRICES_JSON={}
+```
+
+`LANGFUSE_BASE_URL` 优先于兼容变量 `LANGFUSE_HOST`；请使用 API Keys 页面提供的地址，例如日本区 `https://jp.cloud.langfuse.com`。云端使用项目所属 region 的 Host；本地部署使用自己的 Langfuse 地址（例如 `http://localhost:3001`，避免与 Sage Scholar 前端 3000 端口冲突）。密钥在 Langfuse 的 Project Settings → API Keys 创建。部署方法见 [官方自托管说明](https://langfuse.com/self-hosting/deployment/docker-compose)。关闭时把 `OBSERVABILITY_ENABLED` 改回 `false` 并重启。
+
+默认且当前唯一模式是结构化元数据：模型名称、Token、耗时、状态、重试、工具名称和结果长度。**不上传 Prompt、回答、论文原文、工具参数/结果正文、异常文本/堆栈、URL、密钥或图片 Base64**；详细结果仍可在本地 Run/Evidence/Journal 中查阅。费用未知时不填 0；单价可配置，Langfuse 自身的模型价格推算也应视为估算。
+
+启用后正常发起问题，在 `GET /api/runs/{run_id}` 的 `execution.metadata._observability.trace_id` 获取关联 ID；Langfuse 中按 `run_id` 元数据筛选。Clarify 恢复和手动续跑使用同一 Trace、新执行 Span，重启后从已持久化的关联 ID 重建。测试使用内存 Exporter，不向 Langfuse 或付费模型发送请求：
+
+```bash
+python -m pytest -q tests/test_observability.py
+```
+
 ## PDF 图片 RAG
 
 在原文本 RAG 上增加独立的视觉索引：PDF → Docling 图表区域识别 / PyMuPDF 页面渲染 → 本地 Qwen3-VL-Embedding-2B → 图文两路检索 → RRF 排名融合 → DeepSeek 按需读原图。原有文本 embedding、BM25 和 reranker 不换模型、不清库；不同模型的向量不混算相似度。

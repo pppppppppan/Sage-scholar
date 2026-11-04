@@ -2,6 +2,7 @@
 import time
 from openai.types.chat import ChatCompletionMessage
 from sage_scholar.base.cache_usage import cached_input
+from sage_scholar.observability.instrumentation import first_token
 
 
 def openai_text(client, kwargs, control, track, tag):
@@ -16,6 +17,8 @@ def openai_text(client, kwargs, control, track, tag):
             if chunk.choices:
                 delta = chunk.choices[0].delta.content or ""
                 if delta:
+                    if not text:
+                        first_token(time.monotonic() - start)
                     text.append(delta)
                     control.emit("answer_delta", {"text": delta})
     finally:
@@ -26,5 +29,6 @@ def openai_text(client, kwargs, control, track, tag):
         count_tokens = TokenCounter().count
         prompt = usage.prompt_tokens if usage else count_tokens(str(kwargs["messages"]))
         completion = usage.completion_tokens if usage else count_tokens(msg.content)
-        track(prompt, completion, time.monotonic() - start, tag, msg, cached_tokens=cached_input(usage))
+        track(prompt, completion, time.monotonic() - start, tag, msg, cached_tokens=cached_input(usage),
+              usage_source="provider" if usage else "estimated", cost_usd=getattr(usage, "cost_usd", None))
     return msg

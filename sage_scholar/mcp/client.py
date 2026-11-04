@@ -123,7 +123,9 @@ class MCPClient:
             raise ToolCallError(f"MCP {self.name} unavailable", name)
         from sage_scholar.runtime.control import check_control
         from sage_scholar.runtime.journal import WorkflowInterrupted
+        from sage_scholar.observability.instrumentation import mcp_attempt
         for attempt in range(_max_retries + 1):
+            mcp_attempt(attempt)
             check_control()
             future = Future()
             with self._pending_lock:
@@ -143,6 +145,7 @@ class MCPClient:
                 future.cancel()  # Cancel this request, never the shared MCP server.
                 raise
             except TimeoutError:
+                mcp_attempt(attempt, timed_out=True)
                 future.cancel()
                 raise ToolCallError(f"MCP {self.name} tool call timed out", name) from None
             except Exception as exc:

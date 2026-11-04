@@ -18,6 +18,7 @@ from sage_scholar.runtime.human import (
 )
 from sage_scholar.runtime.interaction import resume_command
 from sage_scholar.runtime.limits import execution_budget
+from sage_scholar.observability import stage
 
 ENTRY_VERSION = "semantic-query-v1"
 
@@ -232,7 +233,7 @@ class QueryGraphRunner:
         builder = StateGraph(QueryState)
         for name, node in (("router", router_node), ("clarify", clarify_node), ("direct", direct_node),
                            ("qa", qa_node), ("deep_research", deep_research_node)):
-            builder.add_node(name, node)
+            builder.add_node(name, stage(name)(node))
         builder.add_node("continue", lambda state: {})
         builder.add_edge(START, "router")
         branches = {name: name for name in ("direct", "qa", "clarify", "deep_research")}

@@ -55,6 +55,7 @@ class JournaledTool(BaseTool):
         return self.tool.to_schema()
 
     def run_tool(self, parameters):
+        from sage_scholar.observability.instrumentation import journal_result
         from sage_scholar.runtime.control import check_control
         check_control()
         if self.cancelled():
@@ -69,8 +70,10 @@ class JournaledTool(BaseTool):
                 if self.replay_policy != "safe_retry":
                     raise UnknownToolExecution("外部工具执行状态未知，不能自动重放；请查看记录后明确重新开始")
                 self.store.call_restarted(self.run_id, key, intent)
+                journal_result(retry=True)
                 logger.info("Retrying read-only tool with unknown prior outcome: %s (%s)", self.name, key)
             else:
+                journal_result(replayed=True)
                 if payload.get("error"):
                     raise ToolCallError(payload["error"], self.name)
                 self.replay(payload["result"])

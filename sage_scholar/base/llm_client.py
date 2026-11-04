@@ -1,12 +1,14 @@
 import json
 import os, logging, time
-from openai import OpenAI
+from openai import OpenAI, DefaultHttpxClient
 from openai.types.chat import ChatCompletionMessage
 from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall, Function,
 )
 from dotenv import load_dotenv
 from .cache_usage import cached_input, anthropic_input
+from sage_scholar.observability import model_call, usage
+from sage_scholar.observability.instrumentation import provider_request, provider_response
 
 
 load_dotenv()
@@ -98,7 +100,8 @@ class LLMClient:
             if not _api_key:
                 raise ValueError("Claude 模型需要设置环境变量 ANTHROPIC_API_KEY")
             self._anthropic_client = anthropic.Anthropic(
-                api_key=_api_key, timeout=self.timeout
+                api_key=_api_key, timeout=self.timeout,
+                http_client=anthropic.DefaultHttpxClient(event_hooks={"request": [provider_request], "response": [provider_response]})
             )
             self.extra_body = None
             self.client = None
@@ -108,7 +111,8 @@ class LLMClient:
             else:
                 api_key, base_url, self.extra_body = _resolve_model_env(self.model)
             self.client = OpenAI(
-                api_key=api_key, base_url=base_url, timeout=self.timeout
+                api_key=api_key, base_url=base_url, timeout=self.timeout,
+                http_client=DefaultHttpxClient(event_hooks={"request": [provider_request], "response": [provider_response]})
             )
 
         self.total_prompt_tokens = 0
@@ -120,6 +124,7 @@ class LLMClient:
         self.total_completion_tokens = 0
         self.total_calls = 0
 
+    @model_call
     def invoke(
         self,
         messages: list[dict[str, str]],
@@ -193,9 +198,16 @@ class LLMClient:
                     response = client.chat.completions.create(**kwargs)
                     result = response.choices[0].message
                     result.finish_reason = getattr(response.choices[0], "finish_reason", None)
-                    self._track_usage(response.usage.prompt_tokens, response.usage.completion_tokens,
+                    reported = response.usage
+                    from sage_scholar.context.token_counter import TokenCounter
+                    prompt_tokens = reported.prompt_tokens if reported else prepared.accounting["input_tokens"] + image_tokens
+                    completion_tokens = reported.completion_tokens if reported else TokenCounter().count(
+                        (result.content or "") + str(result.tool_calls or ""))
+                    self._track_usage(prompt_tokens, completion_tokens,
                         time.time() - start, tag, result, cached_tokens=cached_input(response.usage),
-                        image_tokens_estimated=min(image_tokens, max(0, response.usage.prompt_tokens - prepared.accounting["input_tokens"])))
+                        image_tokens_estimated=min(image_tokens, max(0, prompt_tokens - prepared.accounting["input_tokens"])),
+                        usage_source="provider" if reported else "estimated",
+                        cost_usd=getattr(reported, "cost_usd", None))
             # Persist a completed ReAct response before honoring a concurrently requested Stop.
             if on_response is not None:
                 on_response(result)
@@ -290,6 +302,8 @@ class LLMClient:
             prompt_tokens,
             response.usage.output_tokens,
             elapsed, tag, msg, cached_tokens=cache_read,
+            cache_write=getattr(response.usage, "cache_creation_input_tokens", None),
+            cost_usd=getattr(response.usage, "cost_usd", None),
         )
         return msg.model_copy(update={"finish_reason": "length" if response.stop_reason == "max_tokens" else response.stop_reason})
 
@@ -349,7 +363,10 @@ class LLMClient:
 
     # ---- shared ----
 
-    def _track_usage(self, prompt_tokens, completion_tokens, elapsed, tag, msg, cached_tokens=None, image_tokens_estimated=0):
+    def _track_usage(self, prompt_tokens, completion_tokens, elapsed, tag, msg, cached_tokens=None, image_tokens_estimated=0,
+                     usage_source="provider", cache_write=None, cost_usd=None):
+        usage(self.model, prompt_tokens, completion_tokens, source=usage_source, cached=cached_tokens,
+              cache_write=cache_write, cost_usd=cost_usd, elapsed=elapsed)
         from sage_scholar.runtime.metrics import model_stage, record_stage
         record_stage(model_stage(tag), prompt=prompt_tokens, completion=completion_tokens,
                      cached=cached_tokens, seconds=elapsed)

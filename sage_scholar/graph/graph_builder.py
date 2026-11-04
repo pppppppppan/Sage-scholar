@@ -5,6 +5,8 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.config import get_stream_writer
 from langgraph.types import Send
 from langgraph.errors import GraphBubbleUp
+from sage_scholar.observability import stage
+from sage_scholar.observability.instrumentation import failure
 from sage_scholar.context.manager import ContextBudgetExceeded
 from sage_scholar.context.manager import request_context
 from sage_scholar.runtime.journal import WorkflowInterrupted
@@ -124,7 +126,8 @@ def build_graph(supervisor, create_researcher, writer, *, budget=None, checkpoin
             status = note.status
         except (WorkflowInterrupted, ResearchBudgetReached, ContextBudgetExceeded, GraphBubbleUp):
             raise
-        except Exception:
+        except Exception as exc:
+            failure(exc)
             logger.exception("Research task %s failed", task.task_id)
             note = ResearchNote(task_id=task.task_id, question=task.objective, content="此问题未能完成资料收集。", status="failed")
             status = "failed"
@@ -138,7 +141,8 @@ def build_graph(supervisor, create_researcher, writer, *, budget=None, checkpoin
             review = supervisor.review(state["execution"], tasks, notes(state))
         except (WorkflowInterrupted, ResearchBudgetReached, ContextBudgetExceeded, GraphBubbleUp):
             raise
-        except Exception:
+        except Exception as exc:
+            failure(exc)
             logger.exception("Supervisor review failed; preserve notes for writing")
             review = SupervisorReview(remaining_gaps=["研究主管未能完成覆盖审查，报告范围仍需确认"])
         review = prune_review(review, tasks)
@@ -195,7 +199,9 @@ def build_graph(supervisor, create_researcher, writer, *, budget=None, checkpoin
             if fn is not research_node:
                 result.setdefault("execution", state["execution"])
             return result
-        builder.add_node(name, checked)
+        display = {"plan_node": "Supervisor", "research_node": "Researcher",
+                   "review_node": "Supervisor.Review", "write_node": "Writer"}.get(name, name)
+        builder.add_node(name, stage(display)(checked))
     for a, b in [(START, "assess_node"), ("assess_node", "human_node"), ("human_node", "plan_node"),
                  ("plan_node", "dispatch_node"), ("research_node", "review_node"),
                  ("write_node", "finalize_node"), ("finalize_node", END)]:
