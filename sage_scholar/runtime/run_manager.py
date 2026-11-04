@@ -16,7 +16,8 @@ from sage_scholar.context.manager import request_context
 from sage_scholar.domain.execution import ExecutionRequest
 from .journal import WorkflowInterrupted, is_safe_retry_intent
 from .control import RunControl, RunBudgetExceeded, run_control
-from .human import RunWaiting, HumanResponse, public_interrupts
+from .human import RunWaiting, HumanResponse, public_interrupts, validate_routing_response
+from sage_scholar.routing.models import Workflow
 from .limits import ExecutionLimits, execution_budget
 from .models import RunEvent, RunSnapshot, RunStatus, TERMINAL_STATUSES, utc_now
 
@@ -206,18 +207,27 @@ class RunManager:
         if state.snapshot.status != RunStatus.WAITING_FOR_USER:
             raise ValueError("该问题已回答、已取消或已过期")
         question = next((q for q in state.snapshot.interrupts if q["interrupt_id"] == response.interrupt_id), None)
-        if not question or (response.skip and not question.get("allow_skip")) or (not response.skip and not response.answer.strip()):
+        if not question or (response.skip and not question.get("allow_skip")) or (not response.skip and not response.answer.strip() and response.routing_update is None):
             raise ValueError("无效的回答或不可跳过的问题")
+        if response.routing_update is not None and state.snapshot.workflow != Workflow.CLARIFY:
+            raise ValueError("只有 Router 澄清允许更新资料设置")
+        validate_routing_response(question, response)
         if self.store:
             self.store.conversations.assert_open(response.conversation_id)
         # Consume the question durably before scheduling; duplicate submissions see PENDING.
         issue = self._recovery_issue(state)
         if issue:
             raise ValueError(issue)
-        state.snapshot.resume_input = {response.interrupt_id: response.model_dump()}
+        # Preserve patch presence across persistence: omitted allow_web is not an
+        # explicit null/reset. Nested model defaults must not widen permissions.
+        payload = response.model_dump(mode="json", exclude_unset=True)
+        if response.routing_update is not None and not response.answer.strip():
+            # Conversation history must not label a settings confirmation as "skip".
+            payload["answer"] = "已确认并更新本次任务的资料设置。"
+        state.snapshot.resume_input = {response.interrupt_id: payload}
         state.snapshot.interrupts = []
         self._set_status(state, RunStatus.PENDING)
-        await self._append_event(state, "human_responded", response.model_dump())
+        await self._append_event(state, "human_responded", payload)
         previous = self._tasks.get(run_id)
         if previous and not previous.done():
             await asyncio.shield(previous)

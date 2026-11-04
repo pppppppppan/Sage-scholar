@@ -1,6 +1,7 @@
 """Single durable entry graph. Research retains its existing private graph/state."""
 import asyncio
 from concurrent.futures import Future, TimeoutError as FutureTimeout
+import json
 import re
 from typing import TypedDict
 
@@ -11,7 +12,10 @@ from sage_scholar.context.manager import request_context
 from sage_scholar.domain.execution import ExecutionRequest, RunOutcome
 from sage_scholar.routing import RouteDecision, Workflow, ExecutionMode, SourceScope
 from sage_scholar.runtime.control import CURRENT_CONTROL, check_control, cooperative_thread
-from sage_scholar.runtime.human import HumanQuestion, RunWaiting, public_interrupts
+from sage_scholar.runtime.human import (
+    HumanQuestion, RouterQuestion, HumanResponse, RoutingSettings, RunWaiting,
+    public_interrupts, validate_routing_response,
+)
 from sage_scholar.runtime.interaction import resume_command
 from sage_scholar.runtime.limits import execution_budget
 
@@ -98,7 +102,6 @@ class QueryGraphRunner:
             options = execution.metadata.get("_routing", {})
             selected = list(options.get("document_ids", execution.document_ids))
             catalog = wait(self.documents.catalog()) if self.documents else None
-            resolution = None
             # UI selection is contextual. Validate only sources the chosen route uses;
             # otherwise a stale selection can wrongly block an unrelated public task.
             # An explicit save command is an operation, not a keyword-based intent classifier.
@@ -110,7 +113,7 @@ class QueryGraphRunner:
                 route = self.router.route(execution.query,
                     requested_workflow=options.get("workflow"), requested_scope=options.get("source_scope"),
                     document_ids=selected, allow_web=options.get("allow_web"), history=execution.history,
-                    catalog=catalog, resolution_message=resolution)
+                    catalog=catalog)
             if self.documents and route.document_ids and not route.needs_clarification:
                 checked = wait(self.documents.resolve(execution.query, route.document_ids))
                 if checked.message:
@@ -133,18 +136,46 @@ class QueryGraphRunner:
             if state.get("clarification_count", 0) >= 3:
                 raise ValueError("连续澄清后仍无法确定任务，请停止后明确提供问题与资料范围")
             explicit = execution.metadata.get("human_question")
-            question = HumanQuestion.model_validate(explicit) if explicit and not state.get("clarification_count") else HumanQuestion(
-                question=state["route"].clarification_message or "请补充具体问题和资料范围。")
-            answer = interrupt(question.model_dump())
-            text = answer.get("answer", "").strip()
-            if answer.get("skip"):
+            options = execution.metadata.get("_routing", {})
+            conflict = state["route"].reason_code in {
+                "clarify_scope_conflict", "clarify_web_forbidden", "clarify_selected_boundary",
+            }
+            question = HumanQuestion.model_validate(explicit) if explicit and not state.get("clarification_count") else RouterQuestion(
+                question=state["route"].clarification_message or "请补充具体问题和资料范围。",
+                kind="source_policy" if conflict else "information",
+                reason="请使用下方资料设置修改配置；文字回答不会放开权限。" if conflict else "",
+                routing_settings=RoutingSettings.model_validate({
+                    k: options[k] for k in ("source_scope", "allow_web", "document_ids") if k in options
+                }),
+            )
+            answer = HumanResponse.model_validate(interrupt(question.model_dump()))
+            validate_routing_response(question.model_dump(mode="json"), answer)
+            text = answer.answer.strip()
+            if answer.skip:
                 text = "请按合理默认范围自主决定。"
+            settings = dict(options)
+            if answer.routing_update is not None:
+                # This payload is validated by the bound HTTP/HITL response, not inferred
+                # from answer text. It is committed with the node before rerouting.
+                changes = answer.routing_update.model_dump(mode="json", exclude_unset=True)
+                settings.update(changes)
+                confirmation = "用户通过设置明确确认本次资料范围（替代之前对应的设置要求）：" + json.dumps(changes, ensure_ascii=False)
+                text = (text + "\n" if text else "") + confirmation
             if not text:
                 raise ValueError("澄清回答不能为空")
-            metadata = {**execution.metadata, "constraints": [*execution.metadata.get("constraints", []), text]}
+            turns = [*execution.metadata.get("clarification_turns", []),
+                     {"question": question.question, "answer": text,
+                      "routing_update": answer.routing_update.model_dump(mode="json", exclude_unset=True) if answer.routing_update else None}]
+            metadata = {**execution.metadata, "_routing": settings, "clarification_turns": turns,
+                        "constraints": [*execution.metadata.get("constraints", []), text]}
             metadata.pop("human_question", None)
-            updated = execution.model_copy(update={"query": execution.query + "\n用户补充：" + text,
-                                                    "metadata": metadata})
+            history = [*execution.history, {"role": "assistant", "content": question.question},
+                       {"role": "user", "content": text}]
+            updated = execution.model_copy(update={
+                "query": execution.query + "\n澄清问题：" + question.question + "\n用户补充：" + text,
+                "history": history, "metadata": metadata, "workflow": Workflow.ROUTER,
+                "budget": execution_budget(Workflow.ROUTER, settings.get("budget", {})),
+            })
             return {"execution": updated, "clarification_count": state.get("clarification_count", 0) + 1}
 
         def direct_node(state):

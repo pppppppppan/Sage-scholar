@@ -84,6 +84,12 @@ flowchart TD
 
 UI 选中项仅提供上下文，独立公网研究不会自动变成本地问答。`requested_scope` 是硬边界；`allow_web=false` 始终禁止联网，`true` 仅表示允许；文档 ID 必须可解析。详细设计、候选数据集口径及真实前后对比见 [Router V2 说明](evals/ROUTER_V2.md)。
 
+### 澄清后继续执行
+
+普通澄清直接补充信息即可，系统保存问答并继续同一个 Run。若提示资料范围或联网权限冲突，请在澄清卡片的“本次任务的资料设置”中修改范围、联网权限或选中文献，勾选确认后提交。单纯回复“允许联网”不会改变原来的硬权限；设置仅对本次任务生效。未修改的配置不会被重置。
+
+此次恢复修复、真实分类指标和剩余错误见 [Clarify 回归报告](evals/reports/router-clarify/README.md)。
+
 ### 部署并检查 Router
 
 先安装并启动 [Ollama](https://ollama.com/download)。本机已运行 Ollama 应用时不用重复执行 `ollama serve`；命令行方式可在另一个终端执行：

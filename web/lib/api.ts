@@ -144,7 +144,16 @@ export async function uploadFile(file: File): Promise<SaveReportResult> {
   return expectJson<SaveReportResult>(response);
 }
 
-export interface HumanQuestion { interrupt_id: string; question: string; reason: string; options: string[]; allow_skip: boolean }
+export interface RoutingSettings {
+  source_scope: "conversation" | "selected_documents" | "workspace" | "public" | "mixed" | null;
+  allow_web: boolean | null;
+  document_ids: string[];
+}
+export interface HumanQuestion {
+  interrupt_id: string; question: string; reason: string; options: string[]; allow_skip: boolean;
+  kind?: "information" | "source_policy";
+  routing_settings?: RoutingSettings | null;
+}
 
 export type ResearchEvent =
   | { type: "routing"; message: string }

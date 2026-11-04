@@ -1,4 +1,4 @@
-import { API_BASE, expectJson, type SavedRun, type ChatMessage } from "./api";
+import { API_BASE, expectJson, type SavedRun, type ChatMessage, type RoutingSettings } from "./api";
 export interface Conversation { conversation_id: string; workspace_id: string; title: string; archived: boolean; status: SavedRun["status"]; created_at: string; updated_at: string }
 export interface ConversationMessage extends ChatMessage { message_id: string; run_id: string; kind: string }
 export interface ConversationDetail { conversation: Conversation; messages: ConversationMessage[]; runs: SavedRun[] }
@@ -23,10 +23,11 @@ export async function deleteConversation(id: string): Promise<void> {
   const response = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (!response.ok) await expectJson(response);
 }
-export async function answerRun(run: SavedRun, interruptId: string, answer: string, skip = false): Promise<SavedRun> {
+export async function answerRun(run: SavedRun, interruptId: string, answer: string, skip = false, routingUpdate?: RoutingSettings): Promise<SavedRun> {
   return (await expectJson<{ run: SavedRun }>(await fetch(`${API_BASE}/api/runs/${encodeURIComponent(run.run_id)}/respond`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
       run_id: run.run_id, conversation_id: run.execution?.conversation_id, interrupt_id: interruptId, answer, skip,
+      ...(routingUpdate ? { routing_update: routingUpdate } : {}),
     }),
   }))).run;
 }

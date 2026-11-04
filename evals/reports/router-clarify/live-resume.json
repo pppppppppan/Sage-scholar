@@ -1,0 +1,89 @@
+{
+  "mode": "live local Router + real SQLite/LangGraph + stub answer/research services",
+  "cases": [
+    {
+      "case": "missing_topic",
+      "query": "帮我调研一下",
+      "initial_status": "waiting_for_user",
+      "initial_workflow": "clarify",
+      "interrupts": [
+        {
+          "interrupt_id": "e180a746ec9294be35c780f523a7a2c7",
+          "question": "你想研究哪个主题？请提供具体课题或关键词。",
+          "reason": "",
+          "options": [],
+          "allow_skip": false,
+          "kind": "information",
+          "routing_settings": {
+            "source_scope": null,
+            "allow_web": null,
+            "document_ids": []
+          }
+        }
+      ],
+      "expected_workflow": "deep_research",
+      "final_status": "completed",
+      "final_workflow": "deep_research",
+      "error": null,
+      "resumed_query": "帮我调研一下\n澄清问题：你想研究哪个主题？请提供具体课题或关键词。\n用户补充：自适应网格方法的研究进展",
+      "final_interrupts": [],
+      "passed": true
+    },
+    {
+      "case": "ambiguous_papers",
+      "query": "比较这两篇的方法",
+      "initial_status": "waiting_for_user",
+      "initial_workflow": "clarify",
+      "interrupts": [
+        {
+          "interrupt_id": "8b0f5e79f68678a9effc139055cced30",
+          "question": "请明确选择或提供本次要使用的论文。",
+          "reason": "",
+          "options": [],
+          "allow_skip": false,
+          "kind": "information",
+          "routing_settings": {
+            "source_scope": null,
+            "allow_web": null,
+            "document_ids": []
+          }
+        }
+      ],
+      "expected_workflow": "qa",
+      "final_status": "completed",
+      "final_workflow": "qa",
+      "error": null,
+      "resumed_query": "比较这两篇的方法\n澄清问题：请明确选择或提供本次要使用的论文。\n用户补充：已确认并更新本次任务的资料设置。\n用户通过设置明确确认本次资料范围（替代之前对应的设置要求）：{\"document_ids\": [\"a\", \"b\"]}",
+      "final_interrupts": [],
+      "passed": true
+    },
+    {
+      "case": "web_permission",
+      "query": "调研自适应网格方法的最新研究",
+      "initial_status": "waiting_for_user",
+      "initial_workflow": "clarify",
+      "interrupts": [
+        {
+          "interrupt_id": "d6e1ea4a25ac91034feeaaaa46889175",
+          "question": "本次资料范围需要公网，但联网已被禁止；请调整资料范围或明确允许联网。",
+          "reason": "请使用下方资料设置修改配置；文字回答不会放开权限。",
+          "options": [],
+          "allow_skip": false,
+          "kind": "source_policy",
+          "routing_settings": {
+            "source_scope": null,
+            "allow_web": false,
+            "document_ids": []
+          }
+        }
+      ],
+      "expected_workflow": "deep_research",
+      "final_status": "completed",
+      "final_workflow": "deep_research",
+      "error": null,
+      "resumed_query": "调研自适应网格方法的最新研究\n澄清问题：本次资料范围需要公网，但联网已被禁止；请调整资料范围或明确允许联网。\n用户补充：已确认并更新本次任务的资料设置。\n用户通过设置明确确认本次资料范围（替代之前对应的设置要求）：{\"allow_web\": true}",
+      "final_interrupts": [],
+      "passed": true
+    }
+  ]
+}

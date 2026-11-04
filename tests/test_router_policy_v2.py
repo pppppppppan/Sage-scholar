@@ -70,6 +70,7 @@ def test_empty_library_unknown_or_unready_sources():
 def test_selected_only_does_not_expand_to_other_catalog_documents():
     r=route('qa','selected_documents',fields={'document_ids':['b']},document_ids=['a'],requested_scope='selected_documents',catalog=CATALOG)
     assert r.workflow=='clarify' and set(r.document_ids)<= {'a'}
+    assert r.reason_code == 'clarify_selected_boundary'
 
 
 def test_confidence_is_diagnostic_by_default_and_ab_switch_is_explicit():

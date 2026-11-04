@@ -12,6 +12,7 @@ class ResolvedSources:
     available_local: bool
     question: str | None = None
     unknown: tuple[str, ...] = ()
+    boundary_conflict: bool = False
 
 
 class SourceResolver:
@@ -38,6 +39,7 @@ class SourceResolver:
         )
         references = list(dict.fromkeys(intent.document_ids))
         question = None
+        boundary_conflict = False
         if scope == SourceScope.WORKSPACE:
             docs = []  # Workspace is the whole permitted library, never a title-filtered subset.
         else:
@@ -45,6 +47,7 @@ class SourceResolver:
             if requested_scope == SourceScope.SELECTED_DOCUMENTS:
                 if references and not set(references) <= set(selected):
                     question = '所指论文超出明确选择的资料范围，请确认本次允许使用的论文。'
+                    boundary_conflict = True
                 docs = [i for i in docs if i in selected]
         unknown = tuple(i for i in docs if i not in known)
         if unknown:
@@ -59,4 +62,4 @@ class SourceResolver:
         available = bool(set(docs) & ready) if docs else bool(ready)
         if not available and catalog is not None:
             question = question or '当前没有可用的本地资料，请上传论文并等待解析完成，或调整资料范围。'
-        return ResolvedSources(scope, docs, available, question, unknown)
+        return ResolvedSources(scope, docs, available, question, unknown, boundary_conflict)

@@ -19,6 +19,8 @@ class PolicyValidator:
         workflow = Workflow(requested_workflow or intent.workflow)
         scope, docs = sources.scope, sources.document_ids
         question, trigger = sources.question, 'source_resolution' if sources.question else None
+        if sources.boundary_conflict:
+            trigger = 'selected_boundary'
         # A direct operation does not need source access, even when UI context exists.
         if workflow == Workflow.DIRECT:
             scope, docs, question, trigger = SourceScope.CONVERSATION, [], None, None
@@ -57,6 +59,6 @@ class PolicyValidator:
             needs_clarification=bool(question),
             clarification_message=question,
             confidence=intent.confidence,
-            reason_code='semantic_clarify' if question else 'local_semantic',
+            reason_code=f'clarify_{trigger}' if question else 'local_semantic',
         )
         return decision, trigger
