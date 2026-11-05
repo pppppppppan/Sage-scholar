@@ -1,0 +1,22 @@
+{
+  "fetch": {
+    "command": "/opt/fetch/bin/mcp-server-fetch",
+    "args": [],
+    "env": {"all_proxy": "", "ALL_PROXY": ""}
+  },
+  "paper-search": {
+    "command": "/opt/venv/bin/python",
+    "args": ["-m", "paper_search_mcp.server"],
+    "optional_env": ["PAPER_SEARCH_MCP_UNPAYWALL_EMAIL"],
+    "env": {"PAPER_SEARCH_MCP_UNPAYWALL_EMAIL": "${UNPAYWALL_EMAIL}"}
+  },
+  "pdfmux": {
+    "command": "/opt/pdfmux/bin/python",
+    "args": ["-m", "pdfmux.cli", "serve"]
+  },
+  "tavily": {
+    "command": "node",
+    "args": ["/opt/mcp/node_modules/tavily-mcp/build/index.js"],
+    "env": {"TAVILY_API_KEY": "${TAVILY_API_KEY}", "NODE_OPTIONS": "--use-env-proxy"}
+  }
+}

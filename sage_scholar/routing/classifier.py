@@ -85,8 +85,9 @@ class LocalClassifier:
     def __init__(self, config: RouterConfig | None = None, *, transport=None):
         self.config = config or RouterConfig()
         url = urlparse(self.config.base_url)
-        if url.scheme not in {"http", "https"} or url.hostname not in {"localhost", "127.0.0.1", "::1"}:
-            raise ValueError("ROUTER_BASE_URL 必须指向本机 Ollama 地址，不将对话发送到云端分类服务")
+        allowed_hosts = {"localhost", "127.0.0.1", "::1", *self.config.allowed_hosts}
+        if url.scheme not in {"http", "https"} or url.hostname not in allowed_hosts or url.username or url.password:
+            raise ValueError("ROUTER_BASE_URL 必须指向本机或 ROUTER_ALLOWED_HOSTS 显式许可的自管 Ollama 地址")
         self.transport = transport
 
     @model_call

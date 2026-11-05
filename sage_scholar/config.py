@@ -52,6 +52,9 @@ class RouterConfig:
     model: str = field(default_factory=lambda: os.getenv("ROUTER_MODEL", "qwen3.5:2b"))
     timeout: float = field(default_factory=lambda: float(os.getenv("ROUTER_TIMEOUT", "60")))
     confidence_threshold: float = field(default_factory=lambda: float(os.getenv("ROUTER_CONFIDENCE_THRESHOLD", "0.65")))
+    # Explicit deployment trust boundary; default remains loopback-only.
+    allowed_hosts: tuple[str, ...] = field(default_factory=lambda: tuple(
+        h.strip().lower() for h in os.getenv("ROUTER_ALLOWED_HOSTS", "").split(",") if h.strip()))
 
 
 @dataclass

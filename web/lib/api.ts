@@ -1,4 +1,5 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+export const API_BASE = (typeof window === "undefined" ? process.env.BACKEND_INTERNAL_URL : undefined)
+  ?? process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
 export type Workflow =
   | "router"

@@ -1,0 +1,18 @@
+# Application versions observed in the existing working environment.
+# CPU Torch is installed separately. Transitive Python dependencies are not a full lock.
+torch==2.14.0
+sentence-transformers==5.7.0
+transformers==5.17.0
+openai==3.16.2
+anthropic==0.125.0
+pydantic==2.13.5
+langgraph==1.2.11
+langgraph-checkpoint-sqlite==3.1.1
+mcp==1.30.0
+fastmcp==3.4.0
+fastapi==0.141.1
+uvicorn==0.53.0
+faiss-cpu==1.15.1
+PyMuPDF==1.27.2.3
+tiktoken==0.14.0
+trafilatura==2.2.0

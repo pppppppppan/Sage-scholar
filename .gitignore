@@ -2,6 +2,9 @@
 .env
 .env.*
 !.env.example
+!.env.docker.example
+docker-compose.override.yml
+docker-compose.override.yaml
 *.pem
 *.key
 
@@ -56,7 +59,21 @@ eval-results/
 *.db
 
 # Local documents and datasets
-docs/
+docs/*
+!docs/implementation-notes.md
+!docs/local-development.md
+!docs/configuration.md
+!docs/architecture.md
+!docs/rag.md
+!docs/deep-research.md
+!docs/router-evaluation.md
+!docs/observability.md
+!docs/faq.md
+!docs/repository-audit.md
+!docs/migration-map.md
+!docs/deployment/
+docs/deployment/*
+!docs/deployment/*.md
 *.pdf
 *.doc
 *.docx
